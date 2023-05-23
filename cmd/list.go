@@ -77,6 +77,4 @@ func doList(watchName string) {
 
 	buf.WriteString("]")
 	fmt.Println(buf.String())
-
-	return
 }
