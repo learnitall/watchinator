@@ -2,7 +2,6 @@ package pkg
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/shurcooL/githubv4"
@@ -31,25 +30,39 @@ func (w *watchinator) getPollCallback(ctx context.Context, gh GitHubinator, watc
 	filter := watch.GetIssueFilter()
 	matchinator := watch.GetMatchinator()
 
+	MetricPollTickTotal.WithLabelValues(watch.Name).Inc()
+
+	errorMetric := MetricPollErrorTotal.WithLabelValues(watch.Name)
+
 	return func(t time.Time) {
 		logger := w.logger.With("time", t, "watch", watch.Name)
 
 		for _, r := range watch.Repositories {
-			repoLogger := logger.With("repo", fmt.Sprintf("%s/%s", r.Owner, r.Name))
+			repoLogger := logger.With("repo", r)
 			repoLogger.Info("updating repo")
 
 			issues, err := gh.ListIssues(ctx, r, filter, matchinator)
 			if err != nil {
 				repoLogger.Error("unable to list issues from GitHub", LogKeyError, err)
 
+				errorMetric.Inc()
+
 				continue
 			}
 
 			for _, i := range issues {
-				issueLogger := repoLogger.With("issue", i.Number)
+				issueLogger := repoLogger.With(
+					"issue",
+					slog.GroupValue(
+						slog.Int("number", i.Number),
+						slog.String("title", i.Title),
+					),
+				)
 
 				if i.Subscription == githubv4.SubscriptionStateSubscribed {
-					issueLogger.Debug("skipping issue, user is already subscribed")
+					issueLogger.Info("skipping issue, user is already subscribed")
+
+					errorMetric.Inc()
 
 					continue
 				}
@@ -57,6 +70,8 @@ func (w *watchinator) getPollCallback(ctx context.Context, gh GitHubinator, watc
 				issueLogger.Info("subscribing to new issue")
 				if err := gh.SetSubscription(ctx, i.ID, githubv4.SubscriptionStateSubscribed); err != nil {
 					issueLogger.Error("unable to update subscription for issue", LogKeyError, err)
+
+					errorMetric.Inc()
 				}
 			}
 		}

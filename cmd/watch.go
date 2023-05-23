@@ -6,8 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/learnitall/watchinator/pkg"
 	"github.com/spf13/cobra"
+
+	"github.com/learnitall/watchinator/pkg"
 )
 
 var (
@@ -31,6 +32,8 @@ func doWatch() {
 	configinator := pkg.NewConfiginator(logger)
 	pollinator := pkg.NewPollinator(ctx, logger)
 	watchinator := pkg.NewWatchinator(logger, getGitHubinator, pollinator, configinator)
+
+	go pkg.ServePromEndpoint(ctx)
 
 	if err := watchinator.Watch(ctx, configFilePath); err != nil {
 		fmt.Println(err)

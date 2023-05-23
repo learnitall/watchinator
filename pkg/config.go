@@ -27,9 +27,13 @@ type Config struct {
 	Watches []*Watch `yaml:"watches"`
 }
 
-// LogValue is used by golang.org/x/exp/slog to transform a Config struct into a log-able string.
-func (c Config) LogValue() slog.Value {
-	return slog.StringValue(fmt.Sprintf("%+v", c))
+func (c *Config) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("user", c.User),
+		slog.String("pat", "redeacted"),
+		slog.Duration("interval", c.Interval),
+		slog.Any("watches", c.Watches),
+	)
 }
 
 // Validate ensures that the Config struct is populated correctly. If a field is not properly set, an error is
@@ -132,6 +136,18 @@ type Watch struct {
 	bodyRegex []string         `yaml:"bodyRegex"`
 	// States are a list of issues states to filter by.
 	States []string `yaml:"states"`
+}
+
+func (w *Watch) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("name", w.Name),
+		slog.Any("repos", w.Repositories),
+		slog.Any("selectors", w.selectors),
+		slog.Any("requiredLabels", w.RequiredLabels),
+		slog.Any("searchLabels", w.SearchLabels),
+		slog.Any("bodyRegex", w.bodyRegex),
+		slog.Any("states", w.States),
+	)
 }
 
 // ValidateAndPopulate ensures that the Watch struct has its fields properly set and populates fields as necessary
@@ -273,13 +289,19 @@ func (c *configinator) setupWatcher(path string) (*fsnotify.Watcher, error) {
 
 // loadConfig attempts to unmarshal and validate the config at the given path.
 func (c *configinator) loadConfig(ctx context.Context, gh GitHubinator, path string) (*Config, error) {
+	MetricConfigLoadTotal.Inc()
+
 	config, err := NewConfigFromFile(path)
 	if err != nil {
+		MetricConfigLoadErrorTotal.Inc()
+
 		return nil, fmt.Errorf("err loading config: %w", err)
 	}
 
 	err = config.Validate(ctx, gh)
 	if err != nil {
+		MetricConfigLoadErrorTotal.Inc()
+
 		return nil, fmt.Errorf("unable to validate config: %w", err)
 	}
 
