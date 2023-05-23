@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"testing"
 	"time"
 
@@ -172,7 +172,7 @@ func TestConfiginatorCanWatchForChanges(t *testing.T) {
 
 	initialConfigYAML := string(initialConfigYAMLBytes)
 
-	file, err := ioutil.TempFile("", "config.yaml")
+	file, err := os.CreateTemp("", "config.yaml")
 	assert.NilError(t, err)
 
 	_, err = file.Write(initialConfigYAMLBytes)
@@ -199,8 +199,11 @@ func TestConfiginatorCanWatchForChanges(t *testing.T) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				file.Truncate(0)
-				file.Seek(0, 0)
+				assert.NilError(t, file.Truncate(0))
+
+				_, err = file.Seek(0, 0)
+				assert.NilError(t, err)
+
 				_, err = file.Write(newConfigYAMLBytes)
 				assert.NilError(t, err)
 			}

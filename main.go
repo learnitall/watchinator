@@ -3,5 +3,7 @@ package main
 import "github.com/learnitall/watchinator/cmd"
 
 func main() {
-	cmd.Execute()
+	if err := cmd.Execute(); err != nil {
+		panic(err)
+	}
 }

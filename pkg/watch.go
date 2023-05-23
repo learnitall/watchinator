@@ -68,6 +68,7 @@ func (w *watchinator) getPollCallback(ctx context.Context, gh GitHubinator, watc
 				}
 
 				issueLogger.Info("subscribing to new issue")
+
 				if err := gh.SetSubscription(ctx, i.ID, githubv4.SubscriptionStateSubscribed); err != nil {
 					issueLogger.Error("unable to update subscription for issue", LogKeyError, err)
 

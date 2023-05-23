@@ -54,6 +54,7 @@ func (c *Config) Validate(ctx context.Context, gh GitHubinator) error {
 	if c.Interval <= 0 {
 		return fmt.Errorf("interval must be greater than zero '%s'", c.Interval)
 	}
+
 	user, err := gh.WithToken(c.PAT).WhoAmI(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to validate pat: %w", err)

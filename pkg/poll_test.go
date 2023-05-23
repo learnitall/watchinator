@@ -38,6 +38,7 @@ func TestRunPollCreatesPollThatExecsCallbackOnInterval(t *testing.T) {
 	cancelChan := make(chan bool)
 
 	var startTime time.Time
+
 	seenInitialTick := false
 
 	p := poll{

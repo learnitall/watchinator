@@ -11,7 +11,6 @@ import (
 )
 
 var (
-	logConfig      = pkg.DefaultLogOptions
 	configFilePath string
 
 	gitHubRetries    int

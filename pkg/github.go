@@ -19,7 +19,7 @@ type GitHubItemType string
 
 const (
 	GitHubItemIssue      GitHubItemType = "issue"
-	gitHubNotFoundErrStr                = "Could not resolve to a"
+	gitHubNotFoundErrStr string         = "Could not resolve to a"
 )
 
 // GitHubNotFoundError is raised when a GitHubinator cannot find the given item. It is a special error that can be
@@ -205,7 +205,7 @@ func GitHubItemAsLabelSet(i *GitHubItem) labels.Set {
 	return labels.Set(m)
 }
 
-// isGitHubItemField is used to validate if a label selector is targetting an actual field present in a GitHubItem.
+// isGitHubItemField is used to validate if a label selector is targeting an actual field present in a GitHubItem.
 // This function does not use reflect, and is therefore coupled with the GitHubItem definition.
 func isGitHubItemField(f string) bool {
 	switch f {

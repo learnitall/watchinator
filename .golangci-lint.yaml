@@ -1,0 +1,20 @@
+linters:
+  enable:
+    - godot
+    - godox
+    - gosec
+    - gofmt
+    - goimports
+    - goerr113
+    - misspell
+    - nosprintfhostport
+    - promlinter
+    - predeclared
+    - nlreturn
+    - wsl
+    - whitespace
+
+issues:
+  exclude-rules:
+    - linters: [goerr113]
+      text: "do not define dynamic errors, use wrapped static errors instead" # This rule to avoid opinionated check fmt.Errorf("text")

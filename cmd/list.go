@@ -10,8 +10,7 @@ import (
 )
 
 var (
-	watchName string
-	listCmd   = &cobra.Command{
+	listCmd = &cobra.Command{
 		Use:   "list",
 		Short: "List things on GitHub using the provided config.",
 		Run: func(cmd *cobra.Command, args []string) {

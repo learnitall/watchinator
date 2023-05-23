@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -12,8 +11,7 @@ import (
 )
 
 var (
-	defaultPollInterval = time.Hour * time.Duration(1)
-	watchCmd            = &cobra.Command{
+	watchCmd = &cobra.Command{
 		Use:   "watch",
 		Short: "Watch things on GitHub and subscribe to them",
 		Run: func(cmd *cobra.Command, args []string) {

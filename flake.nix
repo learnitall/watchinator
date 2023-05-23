@@ -17,6 +17,7 @@
   flake-utils.lib.eachDefaultSystem (system: 
     let
       pkgs = nixpkgs.legacyPackages.${system};
+      
       goDrv = pkgs.buildGoModule {
         pname = "watchinator";
         inherit version;
@@ -32,6 +33,16 @@
         ];
         vendorHash = "sha256-Ra8EIAda+S0lZdp9m4RnRTzL4Tm7zzkrmrM65GwQI4I=";
 
+        buildInputs = with pkgs; [
+          golangci-lint
+        ];
+
+        preBuild = ''
+          export HOME=$(pwd)
+          ${pkgs.golangci-lint}/bin/golangci-lint run --config .golangci-lint.yaml \
+            --verbose
+        '';
+
         meta = {
           description = "";
           homepage = "https://github.com/learnitall/watchinator";
@@ -45,6 +56,7 @@
           ];
         };
       };
+
       dockerImage = pkgs.dockerTools.buildImage {
         name = "watchinator";
         inherit tag;
