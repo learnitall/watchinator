@@ -70,8 +70,9 @@ type GitHubIssue struct {
 	Labels       []string                   `json:"labels"`
 	Number       int                        `json:"number"`
 	State        githubv4.IssueState        `json:"state"`
-	Title        string                     `json:"title"`
 	Subscription githubv4.SubscriptionState `json:"Subscription"`
+	Title        string                     `json:"title"`
+	UpdatedAt    time.Time                  `json:"updatedAt"`
 }
 
 func (i GitHubIssue) LogValue() slog.Value {
@@ -83,8 +84,9 @@ func (i GitHubIssue) LogValue() slog.Value {
 		slog.String("body", i.Body),
 		slog.Int("number", i.Number),
 		slog.String("state", string(i.State)),
-		slog.String("title", i.Title),
 		slog.String("subscription", string(i.Subscription)),
+		slog.String("title", i.Title),
+		slog.Time("updatedAt", i.UpdatedAt),
 	)
 }
 
@@ -98,8 +100,9 @@ func NewTestGitHubIssue() *GitHubIssue {
 		Labels:       []string{"a/test/label", "another/label"},
 		Number:       1,
 		State:        "OPEN",
-		Title:        "a test issue",
 		Subscription: "UNSUBSCRIBED",
+		Title:        "a test issue",
+		UpdatedAt:    time.Now(),
 	}
 }
 
@@ -315,6 +318,42 @@ func (v gitHubLabelQueryVars) LogValue() slog.Value {
 	)
 }
 
+type gitHubIssueBodyQuery struct {
+	Repository struct {
+		Issue struct {
+			BodyText githubv4.String
+		} `graphql:"issue(number: $issueNumber)"`
+	} `graphql:"repository(owner: $owner, name: $name)"`
+}
+
+func (q gitHubIssueBodyQuery) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("bodyText", string(q.Repository.Issue.BodyText)),
+	)
+}
+
+type gitHubIssueBodyQueryVars struct {
+	Owner       githubv4.String
+	Name        githubv4.String
+	IssueNumber githubv4.Int
+}
+
+func (v *gitHubIssueBodyQueryVars) AsMap() map[string]any {
+	return map[string]any{
+		"owner":       v.Owner,
+		"name":        v.Name,
+		"issueNumber": v.IssueNumber,
+	}
+}
+
+func (v gitHubIssueBodyQueryVars) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("owner", string(v.Owner)),
+		slog.String("name", string(v.Name)),
+		slog.Int("issueNumber", int(v.IssueNumber)),
+	)
+}
+
 // gitHubIssueQuery is used to query the GitHub graphql for an issue.
 // Because the GitHub issue contains paginated labels, we need to do a special work around to query the issue and
 // labels separately to fill in a GitHubIssue struct.
@@ -323,11 +362,11 @@ type gitHubIssueQuery struct {
 		Issues struct {
 			Nodes []struct {
 				Author             GitHubActor
-				BodyText           githubv4.String
 				ID                 githubv4.ID
 				Number             githubv4.Int
 				Title              githubv4.String
 				State              githubv4.IssueState
+				UpdatedAt          githubv4.DateTime
 				ViewerSubscription githubv4.SubscriptionState
 			}
 			PageInfo struct {
@@ -345,11 +384,13 @@ func (q *gitHubIssueQuery) AsGitHubIssues() map[githubv4.ID]*GitHubIssue {
 	for _, n := range q.Repository.Issues.Nodes {
 		issues[n.ID] = &GitHubIssue{
 			Author:       &n.Author,
-			Body:         string(n.BodyText),
+			Body:         "",
+			Labels:       []string{},
 			Number:       int(n.Number),
 			State:        n.State,
-			Title:        string(n.Title),
 			Subscription: n.ViewerSubscription,
+			Title:        string(n.Title),
+			UpdatedAt:    n.UpdatedAt.Time,
 		}
 	}
 
@@ -609,13 +650,13 @@ func (gh *gitHubinator) listIssueLabels(
 			queryLogger := gh.logger.With("vars", vars)
 			queryLogger.Debug("executing list issue labels query")
 
-			MetricLabelQueryTotal.Inc()
+			MetricIssueLabelQueryTotal.Inc()
 
 			err := gh.client.Query(ctx, &query, vars.AsMap())
 			if err != nil {
 				queryLogger.Debug("got error on list issue labels query", LogKeyError, err)
 
-				MetricIssueQueryErrorTotal.Inc()
+				MetricIssueLabelQueryErrorTotal.Inc()
 
 				return nil, err
 			}
@@ -634,6 +675,36 @@ func (gh *gitHubinator) listIssueLabels(
 			*vars.LabelsCursor = query.Repository.Issue.Labels.PageInfo.EndCursor
 		}
 	}
+}
+
+func (gh *gitHubinator) getIssueBodyRegex(
+	ctx context.Context, ghr GitHubRepository, issueNumber int,
+) (string, error) {
+	query := &gitHubIssueBodyQuery{}
+
+	vars := gitHubIssueBodyQueryVars{
+		Owner:       githubv4.String(ghr.Owner),
+		Name:        githubv4.String(ghr.Name),
+		IssueNumber: githubv4.Int(issueNumber),
+	}
+
+	queryLogger := gh.logger.With("vars", vars)
+	queryLogger.Debug("executing get issue body text query")
+
+	MetricIssueBodyQueryTotal.Inc()
+
+	err := gh.client.Query(ctx, &query, vars.AsMap())
+	if err != nil {
+		queryLogger.Debug("got error on get issue body regex query", LogKeyError, err)
+
+		MetricIssueLabelQueryErrorTotal.Inc()
+
+		return "", err
+	}
+
+	queryLogger.Debug("got response on get issue body text query", "response", query)
+
+	return string(query.Repository.Issue.BodyText), nil
 }
 
 func (gh *gitHubinator) ListIssues(
@@ -687,16 +758,26 @@ func (gh *gitHubinator) ListIssues(
 
 				queryLogger.Debug("got item for list issues query", "issue", item)
 
-				labels, err := gh.listIssueLabels(ctx, ghr, issue.Number)
-				if err != nil {
-					return nil, err
+				if matcher.HasRequiredLabels() {
+					labels, err := gh.listIssueLabels(ctx, ghr, issue.Number)
+					if err != nil {
+						return nil, err
+					}
+
+					item.GitHubIssue.Labels = labels
 				}
 
-				item.Labels = labels
+				if matcher.HasBodyRegex() {
+					bodyText, err := gh.getIssueBodyRegex(ctx, ghr, issue.Number)
+					if err != nil {
+						return nil, err
+					}
+
+					item.GitHubIssue.Body = bodyText
+				}
 
 				if matches, reason := matcher.Matches(item); !matches {
 					queryLogger.Debug("item filtered out by the matcher", "item", item, "reason", reason)
-
 					MetricFilteredTotal.Inc()
 
 					continue

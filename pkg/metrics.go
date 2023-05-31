@@ -80,17 +80,28 @@ var (
 			Help: "The total number of errors observed during issue queries against GitHub",
 		},
 	)
-
-	MetricLabelQueryTotal = promauto.NewCounter(
+	MetricIssueLabelQueryTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
-			Name: "watchinator_label_query_total",
-			Help: "The total number of label queries that have been made against GitHub",
+			Name: "watchinator_issue_label_query_total",
+			Help: "The total number of issue label queries that have been made against GitHub",
 		},
 	)
-	MetricLabelQueryErrorTotal = promauto.NewCounter(
+	MetricIssueLabelQueryErrorTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
-			Name: "watchinator_label_query_error_total",
-			Help: "The total number of errors observed during label queries against GitHub",
+			Name: "watchinator_issue_label_query_error_total",
+			Help: "The total number of errors observed during issue label queries against GitHub",
+		},
+	)
+	MetricIssueBodyQueryTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "watchinator_issue_body_query_total",
+			Help: "The total number of issue body queries that have been made against GitHub",
+		},
+	)
+	MetricIssueBodyQueryErrorTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "watchinator_issue_body_query_error_total",
+			Help: "The total number of errors observed during issue body queries against GitHub",
 		},
 	)
 )
