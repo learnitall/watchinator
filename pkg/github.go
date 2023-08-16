@@ -480,6 +480,12 @@ type MockGitHubinator struct {
 
 	// WhoAmIError holds the errors that will be returned from WhoAmI.
 	WhoAmIError error
+
+	// SetSubscriptionRequests holds the issue IDs passed to SetSubscription.
+	SetSubscriptionRequests []githubv4.ID
+
+	// SetSubscriptionError holds the returned error for SetSubscription
+	SetSubscriptionError error
 }
 
 func (t *MockGitHubinator) WithRetries(_ int) GitHubinator { return t }
@@ -509,7 +515,9 @@ func (t *MockGitHubinator) ListIssues(
 func (t *MockGitHubinator) SetSubscription(
 	ctx context.Context, id githubv4.ID, state githubv4.SubscriptionState,
 ) error {
-	return nil
+	t.SetSubscriptionRequests = append(t.SetSubscriptionRequests, id)
+
+	return t.SetSubscriptionError
 }
 
 // NewMockGitHubinator creates a new MockGitHubinator instance with pre-populated, non-error return values.
@@ -520,6 +528,8 @@ func NewMockGitHubinator() *MockGitHubinator {
 		WhoAmIRequests:          0,
 		WhoAmIReturn:            "user",
 		WhoAmIError:             nil,
+		SetSubscriptionRequests: []githubv4.ID{},
+		SetSubscriptionError:    nil,
 	}
 }
 
