@@ -65,7 +65,7 @@ type GitHubLabel struct {
 // It is associated with the following GraphQL object:
 // https://docs.github.com/en/graphql/reference/objects#issue.
 type GitHubIssue struct {
-	Author       *GitHubActor               `json:"author"`
+	Author       GitHubActor                `json:"author"`
 	Body         string                     `json:"body"`
 	Labels       []string                   `json:"labels"`
 	Number       int                        `json:"number"`
@@ -93,7 +93,7 @@ func (i GitHubIssue) LogValue() slog.Value {
 // NewTestGitHubIssue creates a new GitHubIssue struct with pre-populated fields. It can be used in unit tests.
 func NewTestGitHubIssue() *GitHubIssue {
 	return &GitHubIssue{
-		Author: &GitHubActor{
+		Author: GitHubActor{
 			Login: "actor",
 		},
 		Body:         "issue body",
@@ -383,7 +383,7 @@ func (q *gitHubIssueQuery) AsGitHubIssues() map[githubv4.ID]*GitHubIssue {
 
 	for _, n := range q.Repository.Issues.Nodes {
 		issues[n.ID] = &GitHubIssue{
-			Author:       &n.Author,
+			Author:       n.Author,
 			Body:         "",
 			Labels:       []string{},
 			Number:       int(n.Number),
