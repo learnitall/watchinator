@@ -11,7 +11,7 @@ import (
 
 var (
 	listCmd = &cobra.Command{
-		Use:   "list",
+		Use:   "list watch_name",
 		Short: "List things on GitHub using the provided config.",
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := cobra.MinimumNArgs(1)(cmd, args); err != nil {
