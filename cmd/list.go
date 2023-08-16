@@ -68,7 +68,7 @@ func doList(watchName string) {
 
 			buf.Write(marshalled)
 
-			if repoIndex == numRepos-1 && issueIndex != numIssues-1 {
+			if repoIndex != numRepos-1 || issueIndex != numIssues-1 {
 				buf.WriteString(",")
 			}
 		}
