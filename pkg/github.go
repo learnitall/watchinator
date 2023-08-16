@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -626,9 +625,7 @@ func (gh *gitHubinator) CheckRepository(ctx context.Context, ghr GitHubRepositor
 
 		MetricRepoQueryErrorTotal.Inc()
 
-		if strings.HasPrefix(err.Error(), gitHubNotFoundErrStr) {
-			return GitHubNotFoundError(err)
-		}
+		return err
 	}
 
 	queryLogger.Debug("response on check repository query", "result", query)
