@@ -544,26 +544,35 @@ type gitHubinator struct {
 }
 
 func (gh *gitHubinator) WithRetries(retries int) GitHubinator {
-	gh.retries = retries
-	gh.client = nil
-
-	return gh
+	return &gitHubinator{
+		retries: retries,
+		timeout: gh.timeout,
+		token:   gh.token,
+		client:  nil,
+		logger:  gh.logger,
+	}
 }
 
 func (gh *gitHubinator) WithTimeout(timeout time.Duration) GitHubinator {
-	gh.timeout = timeout
-	gh.client = nil
-
-	return gh
+	return &gitHubinator{
+		retries: gh.retries,
+		timeout: timeout,
+		token:   gh.token,
+		client:  nil,
+		logger:  gh.logger,
+	}
 }
 
 func (gh *gitHubinator) WithToken(token string) GitHubinator {
-	gh.token = oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: token},
-	)
-	gh.client = nil
-
-	return gh
+	return &gitHubinator{
+		retries: gh.retries,
+		timeout: gh.timeout,
+		token: oauth2.StaticTokenSource(
+			&oauth2.Token{AccessToken: token},
+		),
+		client: nil,
+		logger: gh.logger,
+	}
 }
 
 func (gh *gitHubinator) setupClient() {

@@ -32,6 +32,9 @@ watches:
     - "bug"
   searchLabels:
     - "bug"
+  actions:
+    subscribe:
+      enabled: true
 ```
 
 3. Validate the config:
@@ -67,7 +70,8 @@ GitHub only has support for automatically subscribing to all issues on a reposit
 generate noise in an inbox.
 
 Watchinator will continually poll GitHub for new issues and filter them based on pre-configured criteria. If an issue matches
-the pre-configured criteria, then watchinator will subscribe the user to it.
+the pre-configured criteria, then watchinator will perform pre-configured actions, such as subscribing the user to the issue or
+sending an email to the user containing the issue.
 
 ## Configuration
 
@@ -75,7 +79,7 @@ Watchinator is configured using a yaml-configurtion file. Documentation is provi
 starts up, validation is performed on the configuration to ensure things are set correctly.
 
 Each config file is composed of multiple 'Watches'. A 'Watch' describes a set of match criteria which will be applied to
-the watche's configured repositories.
+the watch's configured repositories, and a set of actions which will be performed on a match.
 
 ### Example
 
@@ -269,6 +273,84 @@ Running a 'list' should return only a single issue:
   }
 ]
 ```
+
+Finally, let's tell watchinator what to do when it finds a new issue. In this example, let's ask watchinator to ensure we are
+subscribed to matched issues:
+
+```yaml
+watches:
+- name: "example"
+  repos:
+    - name: "watchinator"
+      owner: "learnitall"
+  states:
+    - OPEN
+  requiredLabels:
+    - "bug"
+    - "wontfix"
+  searchLabels:
+    - "bug"
+  bodyRegex:
+    - "^Can the watchinator subscribe to this issue\\?$"
+  selectors
+    - "number==1"
+  actions:
+    subscribe:
+      enabled: true
+```
+
+This action will be performed when watchinator is kicked off using the 'watch' subcommand, which will continually poll GitHub
+for issues using the interval we configured earlier.
+
+Another action we can have the watchinator take is send us an email for each matched issue we aren't subscribed to. This can be
+useful, as GitHub will not notify us if we subscribe to a new issue, only when a subscribed issue has an update. To
+configure the email action, first let's teach watchinator how to send an email from a gmail account.
+
+To do this, we first need to generate a 16 character [app-specific password](https://support.google.com/accounts/answer/185833?hl=en)
+for the account. Once we have this, we can add it into our config, along with information on how to connect to gmail's
+smtp service:
+
+```yaml
+user: your_username
+pat: your_pat
+interval: some_interval
+email:
+  username: "myemail@gmail.com"
+  password: "1234567890123456"
+  host: "smtp.gmail.com"
+  port: 587
+```
+
+After this, we just need to add the email action into our watch configuration:
+
+```
+watches:
+- name: "example"
+  repos:
+    - name: "watchinator"
+      owner: "learnitall"
+  states:
+    - OPEN
+  requiredLabels:
+    - "bug"
+    - "wontfix"
+  searchLabels:
+    - "bug"
+  bodyRegex:
+    - "^Can the watchinator subscribe to this issue\\?$"
+  selectors
+    - "number==1"
+  actions:
+    subscribe:
+      enabled: true
+    email:
+      enabled: true
+      sendTo: "myotheremail@gmail.com"
+```
+
+The next time watchinator is started using the 'watch' subcommand, when it finds an issue on GitHub that we haven't subscribed to yet
+that matches our criteria it will send an email to "myotheremail@gmail.com" from "myemail@gmail.com" containing the issue formatted
+as JSON.
 
 ## Installation
 

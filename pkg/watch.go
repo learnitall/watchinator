@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/shurcooL/githubv4"
 	"golang.org/x/exp/slog"
 )
 
@@ -18,17 +17,21 @@ type Watchinator interface {
 
 // watchinator is the internal implementation of the Watchinator interface.
 type watchinator struct {
-	gitHubinatorFactoryFunc func() GitHubinator
-	logger                  *slog.Logger
-	pollinator              Pollinator
-	configinator            Configinator
+	gitHubinator GitHubinator
+	logger       *slog.Logger
+	pollinator   Pollinator
+	configinator Configinator
+	emailinator  Emailinator
 }
 
 // getPollCallback returns a function that executes on each tick in the poller for a Watch. It lists items from GitHub
 // using the given GitHubinator, and subscribes to them if the viewer is not already subscribed. Errors are logged.
-func (w *watchinator) getPollCallback(ctx context.Context, gh GitHubinator, watch *Watch) func(t time.Time) {
+func (w *watchinator) getPollCallback(
+	ctx context.Context, gh GitHubinator, e Emailinator, watch *Watch,
+) func(t time.Time) {
 	filter := watch.GetIssueFilter()
 	matchinator := watch.GetMatchinator()
+	actioninator := watch.GetActioninator(gh, e)
 
 	MetricPollTickTotal.WithLabelValues(watch.Name).Inc()
 
@@ -59,18 +62,8 @@ func (w *watchinator) getPollCallback(ctx context.Context, gh GitHubinator, watc
 					),
 				)
 
-				if i.Subscription == githubv4.SubscriptionStateSubscribed {
-					issueLogger.Info("skipping issue, user is already subscribed")
-
-					errorMetric.Inc()
-
-					continue
-				}
-
-				issueLogger.Info("subscribing to new issue")
-
-				if err := gh.SetSubscription(ctx, i.ID, githubv4.SubscriptionStateSubscribed); err != nil {
-					issueLogger.Error("unable to update subscription for issue", LogKeyError, err)
+				if err := actioninator.Handle(ctx, *i, issueLogger); err != nil {
+					issueLogger.Error("unable to handle issue", LogKeyError, err)
 
 					errorMetric.Inc()
 				}
@@ -83,7 +76,8 @@ func (w *watchinator) getPollCallback(ctx context.Context, gh GitHubinator, watc
 // running polls in the pollinator match the watches in the config.
 func (w *watchinator) getConfigCallback(ctx context.Context) func(c *Config) {
 	return func(c *Config) {
-		gh := w.gitHubinatorFactoryFunc().WithToken(c.PAT)
+		gh := w.gitHubinator.WithToken(c.PAT)
+		e := w.emailinator.WithConfig(&c.Email)
 
 		for _, p := range w.pollinator.List() {
 			needsToBeDeleted := true
@@ -102,27 +96,30 @@ func (w *watchinator) getConfigCallback(ctx context.Context) func(c *Config) {
 		}
 
 		for _, watch := range c.Watches {
-			w.pollinator.Add(watch.Name, c.Interval, w.getPollCallback(ctx, gh, watch), true)
+			w.pollinator.Add(watch.Name, c.Interval, w.getPollCallback(ctx, gh, e, watch), true)
 		}
 	}
 }
 
 func (w *watchinator) Watch(ctx context.Context, configFilePath string) error {
-	return w.configinator.Watch(ctx, configFilePath, w.getConfigCallback(ctx), w.gitHubinatorFactoryFunc())
+	return w.configinator.Watch(
+		ctx, configFilePath, w.getConfigCallback(ctx), w.gitHubinator, w.emailinator,
+	)
 }
 
-// NewWatchinator creates a new Watchinator, using the given gitHubinatorFactory, Pollinator and Configinator to
-// implement the watch behavior.
+// NewWatchinator creates a new Watchinator.
 func NewWatchinator(
 	logger *slog.Logger,
-	gitHubinatorFactory func() GitHubinator,
+	gitHubinator GitHubinator,
 	pollinator Pollinator,
 	configinator Configinator,
+	emailinator Emailinator,
 ) Watchinator {
 	return &watchinator{
-		logger:                  logger,
-		gitHubinatorFactoryFunc: gitHubinatorFactory,
-		pollinator:              pollinator,
-		configinator:            configinator,
+		logger:       logger,
+		gitHubinator: gitHubinator,
+		pollinator:   pollinator,
+		configinator: configinator,
+		emailinator:  emailinator,
 	}
 }

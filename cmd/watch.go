@@ -29,7 +29,9 @@ func doWatch() {
 	logger := pkg.NewLogger()
 	configinator := pkg.NewConfiginator(logger)
 	pollinator := pkg.NewPollinator(ctx, logger)
-	watchinator := pkg.NewWatchinator(logger, getGitHubinator, pollinator, configinator)
+	emailinator := pkg.NewEmailinator(logger)
+	gitHubinator := pkg.NewGitHubinator(logger)
+	watchinator := pkg.NewWatchinator(logger, gitHubinator, pollinator, configinator, emailinator)
 
 	go pkg.ServePromEndpoint(ctx)
 

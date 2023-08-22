@@ -104,6 +104,18 @@ var (
 			Help: "The total number of errors observed during issue body queries against GitHub",
 		},
 	)
+	MetricActionHandleTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "watchinator_action_handle_total",
+			Help: "The total number of times an action handler was executed",
+		}, []string{"action"},
+	)
+	MetricActionHandleErrorTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "watchinator_action_handle_error_total",
+			Help: "The total number of times an error occurred during an action handler execution",
+		}, []string{"action"},
+	)
 )
 
 // ServePromEndpoint creates a new http server which serves prometheus metrics at :2112/metrics.

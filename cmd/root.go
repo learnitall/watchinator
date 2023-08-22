@@ -59,6 +59,10 @@ func getGitHubinator() pkg.GitHubinator {
 		WithTimeout(time.Duration(gitHubTimeoutSec) * time.Second)
 }
 
+func getEmailinator() pkg.Emailinator {
+	return pkg.NewEmailinator(pkg.NewLogger())
+}
+
 // initConfigOrDie reads the cmd's configFilePath variable and loads it into the cmd's cfg variable.
 // If an error occurs, print it exit with rc 1.
 func initConfigOrDie() {
@@ -77,7 +81,9 @@ func initConfigOrDie() {
 // If an error occurs, print it and exit with rc 1.
 func validateConfigOrDie() {
 	gh := getGitHubinator()
-	if err := cfg.Validate(context.Background(), gh); err != nil {
+	e := getEmailinator()
+
+	if err := cfg.Validate(context.Background(), gh, e); err != nil {
 		fmt.Printf("unable to validate config: %s\n", err.Error())
 		os.Exit(1)
 	}
