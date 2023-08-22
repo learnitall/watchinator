@@ -2,7 +2,7 @@
   description = "watchinator";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.05";
     flake-utils = {
       url = "github:numtide/flake-utils";
     };
@@ -31,7 +31,7 @@
           "-X github.com/learnitall/watchinator/cmd.commit=${commit}"
           "-X github.com/learnitall/watchinator/cmd.tag=${tag}"
         ];
-        vendorHash = "sha256-Ra8EIAda+S0lZdp9m4RnRTzL4Tm7zzkrmrM65GwQI4I=";
+        vendorHash = "sha256-yqZJV8bTGHMAb699CjAbQIx1n/YjK+7nvE0hHdIPsbs=";
 
         buildInputs = with pkgs; [
           golangci-lint
@@ -96,6 +96,12 @@
       apps = rec {
         watchinator = flake-utils.lib.mkApp {
           drv = self.packages.${system}.watchinator;
+        };
+        default = watchinator;
+      };
+      nixosModules = rec {
+        watchinator = {
+          imports = [ ./module.nix ];
         };
         default = watchinator;
       };
