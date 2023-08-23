@@ -74,7 +74,7 @@ func initConfigOrDie() {
 		os.Exit(1)
 	}
 
-	pkg.NewLogger().Debug("loaded config", "path", configFilePath)
+	pkg.NewLogger().Debug("loaded config", "path", configFilePath, "config", cfg)
 }
 
 // validateConfigOrDie calls cfg.Validate.

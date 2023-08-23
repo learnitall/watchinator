@@ -76,10 +76,7 @@ type GitHubIssue struct {
 
 func (i GitHubIssue) LogValue() slog.Value {
 	return slog.GroupValue(
-		slog.Attr{
-			Key:   "author",
-			Value: i.Author.LogValue(),
-		},
+		slog.Any("author", i.Author.LogValue()),
 		slog.String("body", i.Body),
 		slog.Int("number", i.Number),
 		slog.String("state", string(i.State)),
@@ -167,10 +164,7 @@ func (i GitHubItem) LogValue() slog.Value {
 
 	switch i.Type {
 	case GitHubItemIssue:
-		embeddedAttr = slog.Attr{
-			Key:   "issue",
-			Value: i.GitHubIssue.LogValue(),
-		}
+		embeddedAttr = slog.Any("issue", i.GitHubIssue.LogValue())
 	default:
 		embeddedAttr = slog.String("embedded", "<none>")
 	}
@@ -178,10 +172,7 @@ func (i GitHubItem) LogValue() slog.Value {
 	return slog.GroupValue(
 		embeddedAttr,
 		slog.String("type", string(i.Type)),
-		slog.Attr{
-			Key:   "repo",
-			Value: i.Repo.LogValue(),
-		},
+		slog.Any("repo", i.Repo.LogValue()),
 		slog.Any("id", i.ID),
 	)
 }

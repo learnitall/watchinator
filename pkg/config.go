@@ -110,8 +110,8 @@ type ActionConfig struct {
 
 func (a *ActionConfig) LogValue() slog.Value {
 	return slog.GroupValue(
-		slog.Attr{Key: "subscribe", Value: a.Subscribe.LogValue()},
-		slog.Attr{Key: "email", Value: a.Email.LogValue()},
+		slog.Any("subscribe", a.Subscribe.LogValue()),
+		slog.Any("email", a.Subscribe.LogValue()),
 	)
 }
 
@@ -159,10 +159,10 @@ func (w *Watch) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("name", w.Name),
 		slog.Any("repos", w.Repositories),
-		slog.Any("selectors", w.selectors),
+		slog.Any("selectors", w.Selectors),
 		slog.Any("requiredLabels", w.RequiredLabels),
 		slog.Any("searchLabels", w.SearchLabels),
-		slog.Any("bodyRegex", w.bodyRegex),
+		slog.Any("bodyRegex", w.BodyRegex),
 		slog.Any("states", w.States),
 	)
 }
@@ -312,12 +312,16 @@ type Config struct {
 }
 
 func (c *Config) LogValue() slog.Value {
+	watchValues := []slog.Attr{}
+	for _, watch := range c.Watches {
+		watchValues = append(watchValues, slog.Any(watch.Name, watch.LogValue()))
+	}
+
 	return slog.GroupValue(
 		slog.String("user", c.User),
-		slog.String("pat", "redeacted"),
 		slog.Duration("interval", c.Interval),
-		slog.Any("email", c.Email),
-		slog.Any("watches", c.Watches),
+		slog.Any("email", c.Email.LogValue()),
+		slog.Any("watches", watchValues), 
 	)
 }
 
