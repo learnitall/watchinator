@@ -20,6 +20,11 @@ in
         type = pkgs.lib.types.str;
         description = "configuration file content";
       };
+      verbose = pkgs.lib.mkOption {
+        default = false;
+        type = pkgs.lib.types.bool;
+        description = "show debug logs";
+      };
     };
   };
   config = pkgs.lib.mkIf cfg.enable {

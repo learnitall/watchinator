@@ -1,11 +1,15 @@
 package pkg
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -15,12 +19,55 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 )
 
+// ReadFirstLineFromFile grabs the first line from the given file.
+// The main use case for this function is reading secrets from files.
+func ReadFirstLineFromFile(path string) (string, error) {
+	if strings.HasPrefix(path, "~/") {
+		u, err := user.Current()
+		if err != nil {
+			return "", err
+		}
+
+		path = filepath.Join(u.HomeDir, path[2:])
+	}
+
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+
+	file, err := os.Open(absPath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+	line := ""
+	isPrefix := true
+
+	var buffer []byte
+
+	for isPrefix {
+		buffer, isPrefix, err = reader.ReadLine()
+		if err != nil {
+			return "", err
+		}
+
+		line += string(buffer)
+	}
+
+	return strings.TrimSpace(line), nil
+}
+
 type EmailConfig struct {
 	// Username to login to SMTP service with. Should be the same as the
 	// sender email address.
 	Username string `yaml:"username"`
-	// Password used to login to the SMTP service.
-	Password string `yaml:"password"`
+	// PasswordFile containing the password used to login to the SMTP service.
+	PasswordFile string `yaml:"passwordFile"`
+	// Password contained within the PasswordFile
+	Password string `yaml:"-"`
 	// Host address of the SMTP service (ie smtp.gmail.com).
 	Host string `yaml:"host"`
 	// Port of the SMTP service to connect to.
@@ -30,6 +77,7 @@ type EmailConfig struct {
 func (e *EmailConfig) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("username", e.Username),
+		slog.String("passwordFile", e.PasswordFile),
 		slog.String("host", e.Host),
 		slog.Int("port", e.Port),
 	)
@@ -40,9 +88,16 @@ func (e *EmailConfig) Validate(ctx context.Context, emailinator Emailinator) err
 		return errors.New("username cannot be empty")
 	}
 
-	if len(e.Password) == 0 {
-		return errors.New("password cannot be empty")
+	if len(e.PasswordFile) == 0 {
+		return errors.New("password file cannot be empty")
 	}
+
+	password, err := ReadFirstLineFromFile(e.PasswordFile)
+	if err != nil {
+		return fmt.Errorf("unable to read password from file %s: %w", e.PasswordFile, err)
+	}
+
+	e.Password = password
 
 	if len(e.Host) == 0 {
 		return errors.New("host cannot be empty")
@@ -299,10 +354,12 @@ func NewTestWatch() *Watch {
 
 // Config specifies the list of Watches to create.
 type Config struct {
-	// GitHub username watch will apply to.
+	// User is the GitHub username the watch will apply to.
 	User string `yaml:"user"`
-	// GitHub PAT used for authentication.
-	PAT string `yaml:"pat"`
+	// PATFile is the file containing the user's PAT used for authentication.
+	PATFile string `yaml:"patFile"`
+	// PAT is the PAT contained in the PATFile.
+	PAT string `yaml:"-"`
 	// Interval used to determine when to update watches.
 	Interval time.Duration `yaml:"interval"`
 	// Email sender configuration for email action.
@@ -321,7 +378,7 @@ func (c *Config) LogValue() slog.Value {
 		slog.String("user", c.User),
 		slog.Duration("interval", c.Interval),
 		slog.Any("email", c.Email.LogValue()),
-		slog.Any("watches", watchValues), 
+		slog.Any("watches", watchValues),
 	)
 }
 
@@ -332,9 +389,16 @@ func (c *Config) Validate(ctx context.Context, gh GitHubinator, e Emailinator) e
 		return errors.New("user cannot be empty")
 	}
 
-	if len(c.PAT) == 0 {
-		return errors.New("pat cannot be empty")
+	if len(c.PATFile) == 0 {
+		return errors.New("pat file cannot be empty")
 	}
+
+	pat, err := ReadFirstLineFromFile(c.PATFile)
+	if err != nil {
+		return fmt.Errorf("unable to read PAT from pat file %s: %w", c.PATFile, err)
+	}
+
+	c.PAT = pat
 
 	if len(c.Watches) == 0 {
 		return errors.New("expected at least one watch")
@@ -405,19 +469,55 @@ func NewConfigFromFile(path string) (*Config, error) {
 }
 
 // NewTestConfig creates a new Config struct with pre-populated fields. It can be used in unit tests.
-func NewTestConfig() *Config {
+func NewTestConfig() (*Config, func(), error) {
+	patFile, err := os.CreateTemp("", "mypatfile")
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to create temporary pat file: %w", err)
+	}
+
+	emailFile, err := os.CreateTemp("", "myemailfile")
+	if err != nil {
+		return nil, nil, fmt.Errorf("unable to create temporary email password file: %w", err)
+	}
+
+	cleanup := func() {
+		if err := os.Remove(patFile.Name()); err != nil {
+			panic(fmt.Errorf("unable to remove temporary pat file: %w", err))
+		}
+
+		if err := os.Remove(emailFile.Name()); err != nil {
+			panic(fmt.Errorf("unable to remove temporary email password file: %w", err))
+		}
+	}
+
+	_, err = patFile.WriteString("1234")
+	if err != nil {
+		defer cleanup()
+
+		return nil, nil, fmt.Errorf("unable to write pat to file %s: %w", patFile.Name(), err)
+	}
+
+	_, err = emailFile.WriteString("password")
+	if err != nil {
+		defer cleanup()
+
+		return nil, nil, fmt.Errorf("unable to write email password to file %s: %w", emailFile.Name(), err)
+	}
+
 	return &Config{
 		User:     "user",
+		PATFile:  patFile.Name(),
 		PAT:      "1234",
 		Interval: time.Hour * 1,
 		Email: EmailConfig{
-			Username: "test@example.com",
-			Password: "password",
-			Host:     "my.email.server.com",
-			Port:     587,
+			Username:     "test@example.com",
+			PasswordFile: emailFile.Name(),
+			Password:     "password",
+			Host:         "my.email.server.com",
+			Port:         587,
 		},
 		Watches: []*Watch{NewTestWatch()},
-	}
+	}, cleanup, nil
 }
 
 // Configinator handles loading a config from disk.

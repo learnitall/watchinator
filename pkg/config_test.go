@@ -3,7 +3,6 @@ package pkg
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -24,13 +23,14 @@ func TestConfigValidateChecksRequiredKeysNotEmpty(t *testing.T) {
 	checkEmpty := func(
 		ref string, setEmpty func(*Config), expectedErrStr string,
 	) {
-		fmt.Println(ref)
+		testConfig, cleanup, err := NewTestConfig()
+		assert.NilError(t, err)
 
-		testConfig := NewTestConfig()
+		defer cleanup()
 
 		setEmpty(testConfig)
 
-		err := testConfig.Validate(ctx, gh, e)
+		err = testConfig.Validate(ctx, gh, e)
 		assert.ErrorContains(t, err, expectedErrStr)
 	}
 
@@ -53,9 +53,9 @@ func TestConfigValidateChecksRequiredKeysNotEmpty(t *testing.T) {
 	checkEmpty(
 		"pat",
 		func(c *Config) {
-			c.PAT = ""
+			c.PATFile = ""
 		},
-		"pat cannot be empty",
+		"pat file cannot be empty",
 	)
 
 	checkEmpty(
@@ -96,9 +96,9 @@ func TestConfigValidateChecksRequiredKeysNotEmpty(t *testing.T) {
 	checkEmpty(
 		"email password",
 		func(c *Config) {
-			c.Email.Password = ""
+			c.Email.PasswordFile = ""
 		},
-		"password cannot be empty",
+		"password file cannot be empty",
 	)
 
 	checkEmpty(
@@ -122,7 +122,11 @@ func TestConfigValidateEnsuresEmailPortIsTLSOrSSL(t *testing.T) {
 	ctx := context.Background()
 	gh := NewMockGitHubinator()
 	e := NewMockEmailinator()
-	c := NewTestConfig()
+	c, cleanup, err := NewTestConfig()
+
+	assert.NilError(t, err)
+
+	defer cleanup()
 
 	assert.NilError(t, c.Validate(ctx, gh, e))
 
@@ -140,7 +144,11 @@ func TestConfigValidatesCanCreateNewEmail(t *testing.T) {
 	ctx := context.Background()
 	gh := NewMockGitHubinator()
 	e := NewMockEmailinator()
-	c := NewTestConfig()
+	c, cleanup, err := NewTestConfig()
+
+	assert.NilError(t, err)
+
+	defer cleanup()
 
 	assert.NilError(t, c.Validate(ctx, gh, e))
 
@@ -152,7 +160,11 @@ func TestConfigValidateChecksIntervalIsGreaterThanZero(t *testing.T) {
 	ctx := context.Background()
 	gh := NewMockGitHubinator()
 	e := NewMockEmailinator()
-	c := NewTestConfig()
+	c, cleanup, err := NewTestConfig()
+
+	assert.NilError(t, err)
+
+	defer cleanup()
 
 	assert.NilError(t, c.Validate(ctx, gh, e))
 
@@ -164,9 +176,13 @@ func TestConfigValidateChecksValuesWithGitHub(t *testing.T) {
 	ctx := context.Background()
 	gh := NewMockGitHubinator()
 	e := NewMockEmailinator()
-	c := NewTestConfig()
+	c, cleanup, err := NewTestConfig()
 
-	err := c.Validate(ctx, gh, e)
+	assert.NilError(t, err)
+
+	defer cleanup()
+
+	err = c.Validate(ctx, gh, e)
 	assert.NilError(t, err)
 
 	assert.Assert(t, cmp.Equal(1, gh.WhoAmIRequests))
@@ -187,6 +203,25 @@ func TestConfigValidateChecksValuesWithGitHub(t *testing.T) {
 
 	gh.WhoAmIReturn = "notauser"
 	assert.ErrorContains(t, c.Validate(ctx, gh, e), "does not match PAT user")
+}
+
+func TestConfigValidateLoadsPATFromFile(t *testing.T) {
+	ctx := context.Background()
+	gh := NewMockGitHubinator()
+	e := NewMockEmailinator()
+	c, cleanup, err := NewTestConfig()
+
+	assert.NilError(t, err)
+
+	defer cleanup()
+
+	err = os.WriteFile(c.PATFile, []byte("mycoolpat"), 0600)
+	assert.NilError(t, err)
+
+	err = c.Validate(ctx, gh, e)
+	assert.NilError(t, err)
+
+	assert.Equal(t, c.PAT, "mycoolpat")
 }
 
 func TestWatchValidateChecksSelectorsAreValid(t *testing.T) {
@@ -228,7 +263,13 @@ func TestWatchValidateChecksRegexCanCompile(t *testing.T) {
 func TestEmailValidateChecksConnection(t *testing.T) {
 	ctx := context.Background()
 	e := NewMockEmailinator()
-	emailConfig := NewTestConfig().Email
+	c, cleanup, err := NewTestConfig()
+
+	assert.NilError(t, err)
+
+	defer cleanup()
+
+	emailConfig := c.Email
 
 	assert.NilError(t, emailConfig.Validate(ctx, e), "unexpected error checking email connection")
 
@@ -239,11 +280,34 @@ func TestEmailValidateChecksConnection(t *testing.T) {
 	)
 }
 
+func TestEmailValidateLoadsPasswordFromFile(t *testing.T) {
+	ctx := context.Background()
+	e := NewMockEmailinator()
+	c, cleanup, err := NewTestConfig()
+
+	assert.NilError(t, err)
+
+	defer cleanup()
+
+	err = os.WriteFile(c.Email.PasswordFile, []byte("mycoolpassword"), 0600)
+	assert.NilError(t, err)
+
+	err = c.Email.Validate(ctx, e)
+	assert.NilError(t, err)
+
+	assert.Equal(t, c.Email.Password, "mycoolpassword")
+}
+
 func TestConfiginatorCanWatchForChanges(t *testing.T) {
 	gh := NewMockGitHubinator()
 	e := NewMockEmailinator()
 
-	initialConfig := NewTestConfig()
+	initialConfig, cleanup, err := NewTestConfig()
+
+	assert.NilError(t, err)
+
+	defer cleanup()
+
 	initialConfigYAMLBytes, err := yaml.Marshal(initialConfig)
 	assert.NilError(t, err)
 
@@ -255,8 +319,11 @@ func TestConfiginatorCanWatchForChanges(t *testing.T) {
 	_, err = file.Write(initialConfigYAMLBytes)
 	assert.NilError(t, err)
 
-	newConfig := NewTestConfig()
-	newConfig.PAT = "acoolpat"
+	newConfig, cleanup, err := NewTestConfig()
+
+	assert.NilError(t, err)
+
+	defer cleanup()
 
 	newConfigYAMLBytes, err := yaml.Marshal(newConfig)
 	assert.NilError(t, err)
