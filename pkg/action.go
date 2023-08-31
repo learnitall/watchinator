@@ -29,6 +29,7 @@ func NewSubscribeAction(gh GitHubinator) GitHubItemAction {
 			}
 
 			logger.Info("subscribing to new issue")
+			MetricActionHandleTotal.WithLabelValues("subscribe").Inc()
 
 			if err := gh.SetSubscription(ctx, i.ID, githubv4.SubscriptionStateSubscribed); err != nil {
 				logger.Error("unable to update subscription for issue", LogKeyError, err)
@@ -52,6 +53,7 @@ func NewEmailAction(emailinator Emailinator, to string) GitHubItemAction {
 			}
 
 			logger.Info("Emailing item", "to", to)
+			MetricActionHandleTotal.WithLabelValues("email").Inc()
 
 			asJson, err := json.MarshalIndent(i, "", "\t")
 			if err != nil {
@@ -133,8 +135,6 @@ func (a *actioninator) Handle(ctx context.Context, item GitHubItem, logger *slog
 		g.Go(
 			func(action GitHubItemAction) func() error {
 				return func() error {
-					MetricActionHandleTotal.WithLabelValues(action.Name).Inc()
-
 					if err := action.Handle(gctx, item, logger); err != nil {
 						MetricActionHandleErrorTotal.WithLabelValues(action.Name).Inc()
 

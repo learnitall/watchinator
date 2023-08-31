@@ -107,7 +107,7 @@ var (
 	MetricActionHandleTotal = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "watchinator_action_handle_total",
-			Help: "The total number of times an action handler was executed",
+			Help: "The total number of times an action handler performed an action, labeled by action name",
 		}, []string{"action"},
 	)
 	MetricActionHandleErrorTotal = promauto.NewCounterVec(
