@@ -20,39 +20,28 @@ in
         type = pkgs.lib.types.str;
         description = "configuration file content";
       };
-      verbose = pkgs.lib.mkOption {
-        default = false;
-        type = pkgs.lib.types.bool;
-        description = "show debug logs";
+      extraArgs = pkgs.lib.mkOption {
+        default = "";
+        type = pkgs.lib.types.str;
+        description = "extra args to pass to watchinator";
       };
     };
   };
-  config = pkgs.lib.mkIf cfg.enable {
-    users.users.watchinator = {
-      isSystemUser = true;
-      group = "watchinator";
+  config.home.file = pkgs.lib.mkIf cfg.enable {
+    watchinator-config = {
+      enable = true;
+      text = "${cfg.config}";
+      target = ".config/watchinator/config.yaml";
     };
-    users.groups.watchinator = {};
-    system.activationScripts = {
-      watchinator-etc = pkgs.lib.stringAfter [ "etc" ] ''
-        mkdir -p /etc/watchinator
-        chown -R watchinator:watchinator /etc/watchinator
-        chmod -R 0755 /etc/watchinator
-      '';
-      watchinator-config = pkgs.lib.stringAfter [ "watchinator-etc" ] ''
-        [ -f "/etc/watchinator/config.yaml" ] && mv /etc/watchinator/config.yaml /etc/watchinator/config.yaml.bak
-        touch /etc/watchinator/config.yaml
-        chown watchinator:watchinator /etc/watchinator/config.yaml
-        chmod 0400 /etc/watchinator/config.yaml
-        echo '${cfg.config}' >> /etc/watchinator/config.yaml
-      '';
+  };
+  config.systemd.user.services.watchinator = pkgs.lib.mkIf cfg.enable {
+    Unit = {
+      Description = "Subscribe to things on GitHub using custom filters";
+      After = "network.target";
     };
-    systemd.services.watchinator = {
-      description = "Run watchinator";
-      serviceConfig = {
-        Type = "simple";
-        ExecStart = "${cfg.package}/bin/watchinator watch --config /etc/watchinator/config.yaml";
-      };
+    Service = {
+      Type = "simple";
+      ExecStart = "${cfg.package}/bin/watchinator watch --config ~/.config/watchinator/config.yaml ${cfg.extraArgs}";
     };
   };
 }

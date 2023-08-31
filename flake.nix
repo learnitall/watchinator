@@ -44,7 +44,7 @@
         '';
 
         meta = {
-          description = "";
+          description = "Subscribe to things on GitHub using custom filters";
           homepage = "https://github.com/learnitall/watchinator";
           license = pkgs.lib.licenses.mit;
           maintainers = [
