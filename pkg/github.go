@@ -684,7 +684,7 @@ func (gh *gitHubinator) listIssueLabels(
 	}
 }
 
-func (gh *gitHubinator) getIssueBodyRegex(
+func (gh *gitHubinator) getIssueBody(
 	ctx context.Context, ghr GitHubRepository, issueNumber int,
 ) (string, error) {
 	query := &gitHubIssueBodyQuery{}
@@ -775,7 +775,7 @@ func (gh *gitHubinator) ListIssues(
 				}
 
 				if matcher.HasBodyRegex() {
-					bodyText, err := gh.getIssueBodyRegex(ctx, ghr, issue.Number)
+					bodyText, err := gh.getIssueBody(ctx, ghr, issue.Number)
 					if err != nil {
 						return nil, err
 					}
@@ -789,6 +789,13 @@ func (gh *gitHubinator) ListIssues(
 
 					continue
 				}
+
+				bodyText, err := gh.getIssueBody(ctx, ghr, issue.Number)
+				if err != nil {
+					return nil, err
+				}
+
+				item.GitHubIssue.Body = bodyText
 
 				allIssues = append(allIssues, item)
 			}
