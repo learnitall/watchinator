@@ -10,7 +10,7 @@
 
   outputs = { self, nixpkgs, flake-utils }: 
   let
-    version = "0.1";
+    version = "main";
     tag = version;
     commit = if (self ? rev) then self.rev else "dirty";
   in
