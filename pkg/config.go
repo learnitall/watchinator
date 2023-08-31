@@ -193,17 +193,17 @@ type Watch struct {
 	// Selectors are used to specify which items to watch, follows the k8s label selector syntax.
 	// See the GitHubItem struct for valid keys and fields and
 	// https://pkg.go.dev/k8s.io/apimachinery@v0.27.1/pkg/labels#Parse for the syntax.
-	selectors []labels.Selector `yaml:"-"`
 	Selectors []string          `yaml:"selectors"`
+	selectors []labels.Selector `yaml:"-"`
 	// RequiredLabels are a list of labels that must be present for an item to be watched. An item must have all of
 	// these labels to be watched.
 	RequiredLabels []string `yaml:"requiredLabels"`
 	// SearchLabels are a set of labels that will be used to find new items. They will not be used as criteria for if
 	// an item is watched, but if an item is discovered from GitHub.
-	SearchLabels []string `yaml:"searchLabels"`
+	SearchLabels []string         `yaml:"searchLabels"`
+	bodyRegex    []*regexp.Regexp `yaml:"-"`
 	// BodyRegex is a list of regex expressions which must match the item's body.
-	bodyRegex []*regexp.Regexp `yaml:"-"`
-	BodyRegex []string         `yaml:"bodyRegex"`
+	BodyRegex []string `yaml:"bodyRegex"`
 	// States are a list of issues states to filter by.
 	States []string `yaml:"states"`
 	// Actions are a list of actions to perform when an item matches the set of filters.
