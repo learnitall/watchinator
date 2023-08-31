@@ -19,9 +19,10 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 )
 
-// ReadFirstLineFromFile grabs the first line from the given file.
-// The main use case for this function is reading secrets from files.
-func ReadFirstLineFromFile(path string) (string, error) {
+// GetAbsolutePath returns the absolute path for the given file system path.
+// It handles replacing '~/' with the current users home directory, and passes the path
+// through a `filepath.Abs` call.
+func GetAbsolutePath(path string) (string, error) {
 	if strings.HasPrefix(path, "~/") {
 		u, err := user.Current()
 		if err != nil {
@@ -32,6 +33,17 @@ func ReadFirstLineFromFile(path string) (string, error) {
 	}
 
 	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+
+	return absPath, err
+}
+
+// ReadFirstLineFromFile grabs the first line from the given file.
+// The main use case for this function is reading secrets from files.
+func ReadFirstLineFromFile(path string) (string, error) {
+	absPath, err := GetAbsolutePath(path)
 	if err != nil {
 		return "", err
 	}
@@ -453,7 +465,12 @@ func (c *Config) GetWatch(name string) *Watch {
 // NewConfigFromFile opens the given path and attempts to unmarshal it into a Config struct. Config.Validate is not
 // called and still needs to be executed by the user.
 func NewConfigFromFile(path string) (*Config, error) {
-	configBody, err := os.ReadFile(path)
+	absPath, err := GetAbsolutePath(path)
+	if err != nil {
+		return nil, err
+	}
+
+	configBody, err := os.ReadFile(absPath)
 	if err != nil {
 		return nil, err
 	}
@@ -581,15 +598,20 @@ func (c *configinator) loadConfig(ctx context.Context, gh GitHubinator, e Emaili
 func (c *configinator) Watch(
 	ctx context.Context, path string, callback func(*Config), gh GitHubinator, e Emailinator,
 ) error {
-	w, err := c.setupWatcher(path)
+	absPath, err := GetAbsolutePath(path)
 	if err != nil {
-		return fmt.Errorf("unable to setup fsnotify watcher for '%s': %w", path, err)
+		return err
+	}
+
+	w, err := c.setupWatcher(absPath)
+	if err != nil {
+		return fmt.Errorf("unable to setup fsnotify watcher for '%s': %w", absPath, err)
 	}
 	defer w.Close()
 
 	c.logger.Debug("attempting initial load of config file")
 
-	config, err := c.loadConfig(ctx, gh, e, path)
+	config, err := c.loadConfig(ctx, gh, e, absPath)
 	if err != nil {
 		return fmt.Errorf("unable to load initial config file: %w", err)
 	} else {
@@ -622,7 +644,7 @@ func (c *configinator) Watch(
 
 			c.logger.Info("config file changed")
 
-			config, err := c.loadConfig(ctx, gh, e, path)
+			config, err := c.loadConfig(ctx, gh, e, absPath)
 			if err != nil {
 				c.logger.Error("unable to handle config change event", LogKeyError, err)
 
