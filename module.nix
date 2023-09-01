@@ -43,5 +43,8 @@ in
       Type = "simple";
       ExecStart = "${cfg.package}/bin/watchinator watch --config ~/.config/watchinator/config.yaml ${cfg.extraArgs}";
     };
+    Install = {
+      WantedBy = [ "default.target" ];
+    };
   };
 }
