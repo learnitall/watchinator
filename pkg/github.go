@@ -775,6 +775,8 @@ func (gh *gitHubinator) ListIssues(
 				}
 
 				if matcher.HasBodyRegex() {
+					queryLogger.Debug("getting issue body for body regex matching")
+
 					bodyText, err := gh.getIssueBody(ctx, ghr, issue.Number)
 					if err != nil {
 						return nil, err
@@ -788,6 +790,8 @@ func (gh *gitHubinator) ListIssues(
 					MetricFilteredTotal.Inc()
 
 					continue
+				} else {
+					queryLogger.Debug("item matched", "item", item, "reason", reason)
 				}
 
 				bodyText, err := gh.getIssueBody(ctx, ghr, issue.Number)
