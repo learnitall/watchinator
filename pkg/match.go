@@ -3,6 +3,7 @@ package pkg
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/labels"
 )
@@ -34,7 +35,7 @@ func SelectorAsGitHubItemMatcher(s labels.Selector) GitHubItemMatcher {
 func BodyRegexAsGitHubItemMatcher(bodyRegex *regexp.Regexp) GitHubItemMatcher {
 	return GitHubItemMatcher{
 		Matcher: func(i *GitHubItem) bool {
-			return bodyRegex.Match([]byte(i.Body))
+			return bodyRegex.Match([]byte(strings.ToLower(i.Body)))
 		},
 		Name: fmt.Sprintf("bodyRegex: '%s'", bodyRegex.String()),
 	}
