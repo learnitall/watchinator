@@ -212,10 +212,13 @@ type Watch struct {
 	RequiredLabels []string `yaml:"requiredLabels"`
 	// SearchLabels are a set of labels that will be used to find new items. They will not be used as criteria for if
 	// an item is watched, but if an item is discovered from GitHub.
-	SearchLabels []string         `yaml:"searchLabels"`
-	bodyRegex    []*regexp.Regexp `yaml:"-"`
+	SearchLabels []string `yaml:"searchLabels"`
 	// BodyRegex is a list of regex expressions which must match the item's body.
-	BodyRegex []string `yaml:"bodyRegex"`
+	BodyRegex []string         `yaml:"bodyRegex"`
+	bodyRegex []*regexp.Regexp `yaml:"-"`
+	// TitleRegex is a list of regex expressions which must match the item's title.
+	TitleRegex []string         `yaml:"titleRegex"`
+	titleRegex []*regexp.Regexp `yaml:"-"`
 	// States are a list of issues states to filter by.
 	States []string `yaml:"states"`
 	// Actions are a list of actions to perform when an item matches the set of filters.
@@ -230,6 +233,7 @@ func (w *Watch) LogValue() slog.Value {
 		slog.Any("requiredLabels", w.RequiredLabels),
 		slog.Any("searchLabels", w.SearchLabels),
 		slog.Any("bodyRegex", w.BodyRegex),
+		slog.Any("titleRegex", w.TitleRegex),
 		slog.Any("states", w.States),
 	)
 }
@@ -285,10 +289,20 @@ func (w *Watch) ValidateAndPopulate(ctx context.Context, gh GitHubinator) error 
 	for _, r := range w.BodyRegex {
 		compiled, err := regexp.Compile(r)
 		if err != nil {
-			return fmt.Errorf("unable to compile regex '%s', %w'", r, err)
+			return fmt.Errorf("unable to compile regex '%s': %w'", r, err)
 		}
 
 		w.bodyRegex = append(w.bodyRegex, compiled)
+	}
+
+	w.titleRegex = []*regexp.Regexp{}
+	for _, r := range w.TitleRegex {
+		compiled, err := regexp.Compile(r)
+		if err != nil {
+			return fmt.Errorf("unable to compile regex '%s': '%w'", r, err)
+		}
+
+		w.titleRegex = append(w.titleRegex, compiled)
 	}
 
 	for _, s := range w.States {
@@ -321,6 +335,7 @@ func (w *Watch) GetIssueFilter() *GitHubIssueFilter {
 func (w *Watch) GetMatchinator() Matchinator {
 	return NewMatchinator().
 		WithBodyRegexes(w.bodyRegex...).
+		WithTitleRegexes(w.titleRegex...).
 		WithSelectors(w.selectors...).
 		WithRequiredLabels(w.RequiredLabels...)
 }
@@ -351,6 +366,7 @@ func NewTestWatch() *Watch {
 		RequiredLabels: []string{"a/requiredLabel"},
 		SearchLabels:   []string{"a/searchLabel"},
 		BodyRegex:      []string{".*"},
+		TitleRegex:     []string{".*"},
 		States:         []string{"OPEN"},
 		Actions: ActionConfig{
 			Subscribe: SubscribeActionConfig{

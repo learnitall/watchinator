@@ -254,9 +254,16 @@ func TestWatchValidateChecksRegexCanCompile(t *testing.T) {
 	w := NewTestWatch()
 
 	w.BodyRegex = []string{".*"}
-	assert.NilError(t, w.ValidateAndPopulate(ctx, gh), "unexpected error compiling regex '.*'")
+	assert.NilError(t, w.ValidateAndPopulate(ctx, gh), "unexpected error compiling body regex '.*'")
+
+	w.TitleRegex = []string{".*"}
+	assert.NilError(t, w.ValidateAndPopulate(ctx, gh), "unexpected error compiling title regex '.*'")
 
 	w.BodyRegex = append(w.BodyRegex, "(")
+	assert.ErrorContains(t, w.ValidateAndPopulate(ctx, gh), "unable to compile regex")
+
+	w.BodyRegex = []string{".*"}
+	w.TitleRegex = append(w.TitleRegex, "(")
 	assert.ErrorContains(t, w.ValidateAndPopulate(ctx, gh), "unable to compile regex")
 }
 

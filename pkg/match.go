@@ -41,6 +41,17 @@ func BodyRegexAsGitHubItemMatcher(bodyRegex *regexp.Regexp) GitHubItemMatcher {
 	}
 }
 
+// TitleRegexAsGitHubItemMatcher creates a new GitHubItemMatcher from the given titleRegex. If the given titleRegex
+// matches on the GitHubItem's Title field, then the matcher returns true.
+func TitleRegexAsGitHubItemMatcher(titleRegex *regexp.Regexp) GitHubItemMatcher {
+	return GitHubItemMatcher{
+		Matcher: func(i *GitHubItem) bool {
+			return titleRegex.Match([]byte(strings.ToLower(i.Title)))
+		},
+		Name: fmt.Sprintf("titleRegex: '%s'", titleRegex.String()),
+	}
+}
+
 // RequiredLabelAsGitHubItemMatcher creates a new GitHubItemMatcher from the givne requiredLabel. If the given
 // requiredLabel is present in the GitHubItem's labels, then the matcher returns true.
 func RequiredLabelAsGitHubItemMatcher(requiredLabel string) GitHubItemMatcher {
@@ -71,6 +82,9 @@ type Matchinator interface {
 
 	// WithBodyRegexes adds the given bodyRegexes to the match critieria.
 	WithBodyRegexes(bodyRegexes ...*regexp.Regexp) Matchinator
+
+	// WithTitleRegexes adds the given titleRegexes to the match critieria.
+	WithTitleRegexes(titleRegexes ...*regexp.Regexp) Matchinator
 
 	// HasBodyRegex returns if a bodyRegex is part of the match criteria.
 	HasBodyRegex() bool
@@ -120,6 +134,18 @@ func (m *matchinator) WithBodyRegexes(bodyRegexes ...*regexp.Regexp) Matchinator
 
 	for _, r := range bodyRegexes {
 		m.matchFuncs = append(m.matchFuncs, BodyRegexAsGitHubItemMatcher(r))
+	}
+
+	return m
+}
+
+func (m *matchinator) WithTitleRegexes(titleRegexes ...*regexp.Regexp) Matchinator {
+	if len(titleRegexes) == 0 {
+		return m
+	}
+
+	for _, r := range titleRegexes {
+		m.matchFuncs = append(m.matchFuncs, TitleRegexAsGitHubItemMatcher(r))
 	}
 
 	return m
