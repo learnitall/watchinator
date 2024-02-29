@@ -1,8 +1,6 @@
 module github.com/learnitall/watchinator
 
-go 1.21
-
-toolchain go1.21.7
+go 1.21.5
 
 require (
 	github.com/fsnotify/fsnotify v1.7.0
@@ -16,7 +14,7 @@ require (
 	golang.org/x/oauth2 v0.17.0
 	golang.org/x/sync v0.6.0
 	gopkg.in/yaml.v3 v3.0.1
-	gotest.tools/v3 v3.4.0
+	gotest.tools/v3 v3.5.1
 	k8s.io/apimachinery v0.29.2
 )
 

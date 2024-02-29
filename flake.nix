@@ -31,7 +31,7 @@
           "-X github.com/learnitall/watchinator/cmd.commit=${commit}"
           "-X github.com/learnitall/watchinator/cmd.tag=${tag}"
         ];
-        vendorHash = "sha256-erDKatcWIjvYEymtXULVtXp/pZyQtcsKUtK4QYtLXCQ=";
+        vendorHash = "sha256-QFXTukiCghrNGCcDOwkvWV50P7+IAY7DlZgAhuCWxRI=";
 
         buildInputs = with pkgs; [
           golangci-lint
@@ -97,6 +97,11 @@
           imports = [ ./module.nix ];
         };
         default = watchinator;
+      };
+      devShells.default = pkgs.mkShell {
+        packages = with pkgs; [
+          go
+        ];
       };
     }
   );
