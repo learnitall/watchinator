@@ -61,13 +61,6 @@
         name = "watchinator";
         inherit tag;
 
-        fromImage = pkgs.dockerTools.pullImage {
-          imageName = "cgr.dev/chainguard/go";
-          imageDigest = "sha256:5a478f52d08abb5a9bbd9acae52e9ff89185f7bfd420f7ecea12d63810192452";
-          sha256 = "sha256-6ozuLvUVNz1N+Bre5fq6XL+d+8LsgZPKNLPVRFvE9mA=";
-          finalImageTag = "1.20";
-        };
-
         copyToRoot = pkgs.buildEnv {
           name = "image-root";
           paths = [ 
