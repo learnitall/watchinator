@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/wneessen/go-mail"
+	"github.com/wneessen/go-mail/log"
 	"golang.org/x/exp/slog"
 )
 
@@ -15,7 +16,7 @@ type goMailLogConnector struct {
 	logger *slog.Logger
 }
 
-func (g *goMailLogConnector) handle(level slog.Level, format string, v []interface{}) {
+func (g *goMailLogConnector) handle(level slog.Level, l log.Log) {
 	ctx := context.Background()
 
 	if !g.logger.Enabled(ctx, level) {
@@ -26,25 +27,38 @@ func (g *goMailLogConnector) handle(level slog.Level, format string, v []interfa
 
 	runtime.Callers(3, pcs[:])
 
-	r := slog.NewRecord(time.Now(), level, fmt.Sprintf(format, v...), pcs[0])
+	r := slog.NewRecord(time.Now(), level, fmt.Sprintf(l.Format, l.Messages...), pcs[0])
+
+	switch l.Direction {
+	case log.DirClientToServer:
+		r.AddAttrs(
+			slog.String(log.DirFromString, "client"),
+			slog.String(log.DirToString, "server"),
+		)
+	case log.DirServerToClient:
+		r.AddAttrs(
+			slog.String(log.DirFromString, "server"),
+			slog.String(log.DirToString, "client"),
+		)
+	}
 
 	_ = g.logger.Handler().Handle(ctx, r)
 }
 
-func (g *goMailLogConnector) Errorf(format string, v ...interface{}) {
-	g.handle(slog.LevelError, format, v)
+func (g *goMailLogConnector) Errorf(l log.Log) {
+	g.handle(slog.LevelError, l)
 }
 
-func (g *goMailLogConnector) Warnf(format string, v ...interface{}) {
-	g.handle(slog.LevelWarn, format, v)
+func (g *goMailLogConnector) Warnf(l log.Log) {
+	g.handle(slog.LevelWarn, l)
 }
 
-func (g *goMailLogConnector) Infof(format string, v ...interface{}) {
-	g.handle(slog.LevelInfo, format, v)
+func (g *goMailLogConnector) Infof(l log.Log) {
+	g.handle(slog.LevelInfo, l)
 }
 
-func (g *goMailLogConnector) Debugf(format string, v ...interface{}) {
-	g.handle(slog.LevelDebug, format, v)
+func (g *goMailLogConnector) Debugf(l log.Log) {
+	g.handle(slog.LevelDebug, l)
 }
 
 func newGoMailLogConnector(logger *slog.Logger) *goMailLogConnector {
@@ -77,7 +91,7 @@ func (e *emailinator) newClient() (*mail.Client, error) {
 			MinVersion: tls.VersionTLS12,
 		})
 	case 465:
-		authOption = mail.WithSSL()
+		authOption = mail.WithSSLPort(false)
 	default:
 		return nil, fmt.Errorf("unrecognized port: %d", e.cfg.Port)
 	}

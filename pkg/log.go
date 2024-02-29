@@ -65,9 +65,9 @@ func NewLogger(_lo ...*LogOptions) *slog.Logger {
 
 	var handler slog.Handler
 	if lo.LogUseJSON {
-		handler = handlerOpts.NewJSONHandler(os.Stderr)
+		handler = slog.NewJSONHandler(os.Stderr, &handlerOpts)
 	} else {
-		handler = handlerOpts.NewTextHandler(os.Stderr)
+		handler = slog.NewTextHandler(os.Stderr, &handlerOpts)
 	}
 
 	logger := slog.New(handler)

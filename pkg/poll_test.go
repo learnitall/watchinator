@@ -14,9 +14,12 @@ import (
 )
 
 var debugLogger = slog.New(
-	slog.HandlerOptions{
-		Level: slog.LevelDebug,
-	}.NewTextHandler(os.Stderr),
+	slog.NewTextHandler(
+		os.Stderr,
+		&slog.HandlerOptions{
+			Level: slog.LevelDebug,
+		},
+	),
 )
 
 func haveTestTimeout(t *testing.T, after time.Duration, done chan bool) {

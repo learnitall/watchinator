@@ -2,7 +2,7 @@
   description = "watchinator";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11";
     flake-utils = {
       url = "github:numtide/flake-utils";
     };
@@ -31,7 +31,7 @@
           "-X github.com/learnitall/watchinator/cmd.commit=${commit}"
           "-X github.com/learnitall/watchinator/cmd.tag=${tag}"
         ];
-        vendorHash = "sha256-yqZJV8bTGHMAb699CjAbQIx1n/YjK+7nvE0hHdIPsbs=";
+        vendorHash = "sha256-erDKatcWIjvYEymtXULVtXp/pZyQtcsKUtK4QYtLXCQ=";
 
         buildInputs = with pkgs; [
           golangci-lint
