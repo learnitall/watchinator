@@ -410,13 +410,8 @@ func (c *Config) LogValue() slog.Value {
 	)
 }
 
-// Validate ensures that the Config struct is populated correctly. If a field is not properly set, an error is
-// returned explaining why.
-func (c *Config) Validate(ctx context.Context, gh GitHubinator, e Emailinator) error {
-	if len(c.User) == 0 {
-		return errors.New("user cannot be empty")
-	}
-
+// LoadPATFile reads the Config's PATFile into the PAT field.
+func (c *Config) LoadPATFile(ctx context.Context) error {
 	if len(c.PATFile) == 0 {
 		return errors.New("pat file cannot be empty")
 	}
@@ -427,6 +422,20 @@ func (c *Config) Validate(ctx context.Context, gh GitHubinator, e Emailinator) e
 	}
 
 	c.PAT = pat
+
+	return nil
+}
+
+// Validate ensures that the Config struct is populated correctly. If a field is not properly set, an error is
+// returned explaining why.
+func (c *Config) Validate(ctx context.Context, gh GitHubinator, e Emailinator) error {
+	if len(c.User) == 0 {
+		return errors.New("user cannot be empty")
+	}
+
+	if err := c.LoadPATFile(ctx); err != nil {
+		return err
+	}
 
 	if len(c.Watches) == 0 {
 		return errors.New("expected at least one watch")

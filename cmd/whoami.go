@@ -25,12 +25,20 @@ func init() {
 func whoAmI() {
 	initConfigOrDie()
 
+	if err := cfg.LoadPATFile(ctx); err != nil {
+		fmt.Println(err)
+
+		os.Exit(1)
+	}
+
 	logger := pkg.NewLogger()
 
 	user, pat := cfg.User, cfg.PAT
 
 	if len(user) == 0 || len(pat) == 0 {
 		fmt.Println("need both user and pat")
+
+		os.Exit(1)
 	}
 
 	logger.Debug("Checking PAT", "user", user)
