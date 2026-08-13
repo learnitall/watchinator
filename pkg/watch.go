@@ -57,7 +57,7 @@ func (w *watchinator) getPollCallback(
 				issueLogger := repoLogger.With(
 					"issue",
 					slog.GroupValue(
-						slog.Int("number", i.Number),
+						slog.Int("number", int(i.Number)),
 						slog.String("title", i.Title),
 					),
 				)

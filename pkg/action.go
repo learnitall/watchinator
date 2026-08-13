@@ -78,7 +78,7 @@ func NewEmailAction(emailinator Emailinator, to string) GitHubItemAction {
 			switch i.Type {
 			case GitHubItemIssue:
 				subjectLine.WriteString("#")
-				subjectLine.WriteString(strconv.Itoa(i.Number))
+				subjectLine.WriteString(strconv.Itoa(int(i.Number)))
 				subjectLine.WriteString(": ")
 				subjectLine.WriteString(i.Title)
 			default:

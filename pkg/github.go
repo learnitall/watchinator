@@ -67,7 +67,7 @@ type GitHubIssue struct {
 	Author       GitHubActor                `json:"author"`
 	Body         string                     `json:"body"`
 	Labels       []string                   `json:"labels"`
-	Number       int                        `json:"number"`
+	Number       int32                      `json:"number"`
 	State        githubv4.IssueState        `json:"state"`
 	Subscription githubv4.SubscriptionState `json:"Subscription"`
 	Title        string                     `json:"title"`
@@ -78,7 +78,7 @@ func (i GitHubIssue) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.Any("author", i.Author.LogValue()),
 		slog.String("body", i.Body),
-		slog.Int("number", i.Number),
+		slog.Int("number", int(i.Number)),
 		slog.String("state", string(i.State)),
 		slog.String("subscription", string(i.Subscription)),
 		slog.String("title", i.Title),
@@ -189,7 +189,7 @@ func GitHubItemAsLabelSet(i *GitHubItem) labels.Set {
 		"repo.name":    i.Repo.Name,
 		"author.login": i.Author.Login,
 		"body":         i.Body,
-		"number":       strconv.Itoa(i.Number),
+		"number":       strconv.Itoa(int(i.Number)),
 		"title":        i.Title,
 		"state":        string(i.State),
 		"subscription": string(i.Subscription),
@@ -376,7 +376,7 @@ func (q *gitHubIssueQuery) AsGitHubIssues() map[githubv4.ID]*GitHubIssue {
 			Author:       n.Author,
 			Body:         "",
 			Labels:       []string{},
-			Number:       int(n.Number),
+			Number:       int32(n.Number),
 			State:        n.State,
 			Subscription: n.ViewerSubscription,
 			Title:        string(n.Title),
@@ -635,7 +635,7 @@ func (gh *gitHubinator) CheckRepository(ctx context.Context, ghr GitHubRepositor
 
 // listIssueLabels returns a list of labels for the given issue, performing pagination as needed.
 func (gh *gitHubinator) listIssueLabels(
-	ctx context.Context, ghr GitHubRepository, issueNumber int,
+	ctx context.Context, ghr GitHubRepository, issueNumber int32,
 ) ([]string, error) {
 	query := &gitHubLabelQuery{}
 
@@ -685,7 +685,7 @@ func (gh *gitHubinator) listIssueLabels(
 }
 
 func (gh *gitHubinator) getIssueBody(
-	ctx context.Context, ghr GitHubRepository, issueNumber int,
+	ctx context.Context, ghr GitHubRepository, issueNumber int32,
 ) (string, error) {
 	query := &gitHubIssueBodyQuery{}
 
