@@ -14,7 +14,15 @@
     tag = version;
     commit = if (self ? rev) then self.rev else "dirty";
   in
-  flake-utils.lib.eachDefaultSystem (system: 
+  {
+    # Modules are system-agnostic: they must not be nested under a system, or Nix
+    # reads the system name as the module name.
+    homeModules = rec {
+      watchinator = import ./module.nix { inherit self; };
+      default = watchinator;
+    };
+  }
+  // flake-utils.lib.eachDefaultSystem (system: 
     let
       pkgs = nixpkgs.legacyPackages.${system};
       
@@ -86,12 +94,6 @@
       apps = rec {
         watchinator = flake-utils.lib.mkApp {
           drv = self.packages.${system}.watchinator;
-        };
-        default = watchinator;
-      };
-      nixosModules = rec {
-        watchinator = {
-          imports = [ ./module.nix ];
         };
         default = watchinator;
       };
