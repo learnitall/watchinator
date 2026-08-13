@@ -29,7 +29,7 @@
           "-X github.com/learnitall/watchinator/cmd.commit=${commit}"
           "-X github.com/learnitall/watchinator/cmd.tag=${tag}"
         ];
-        vendorHash = "sha256-QFXTukiCghrNGCcDOwkvWV50P7+IAY7DlZgAhuCWxRI=";
+        vendorHash = "sha256-5Fo5JVJGpj+J7BvOgtCYiiPNm3eQHxMNvgh2uLpNEik=";
 
         # Linting is a check, not a build step. It also must not run in preBuild:
         # buildGoModule leaks that into the vendoring derivation, where the vendor
