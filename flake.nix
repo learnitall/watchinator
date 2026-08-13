@@ -33,14 +33,13 @@
         ];
         vendorHash = "sha256-QFXTukiCghrNGCcDOwkvWV50P7+IAY7DlZgAhuCWxRI=";
 
-        buildInputs = with pkgs; [
-          golangci-lint
-        ];
-
-        preBuild = ''
+        # Linting is a check, not a build step. It also must not run in preBuild:
+        # buildGoModule leaks that into the vendoring derivation, where the vendor
+        # tree is still incomplete and the lint load fails.
+        nativeCheckInputs = [ pkgs.golangci-lint ];
+        preCheck = ''
           export HOME=$(pwd)
-          ${pkgs.golangci-lint}/bin/golangci-lint run --config .golangci-lint.yaml \
-            --verbose
+          golangci-lint run --config .golangci-lint.yaml --verbose
         '';
 
         meta = {
