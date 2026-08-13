@@ -115,7 +115,7 @@ func (e *EmailConfig) Validate(ctx context.Context, emailinator Emailinator) err
 		return errors.New("host cannot be empty")
 	}
 
-	if !(e.Port == 587 || e.Port == 465) {
+	if e.Port != 587 && e.Port != 465 {
 		return errors.New("port must be 587 (TLS) or 465 (SSL)")
 	}
 
@@ -446,8 +446,8 @@ func (c *Config) Validate(ctx context.Context, gh GitHubinator, e Emailinator) e
 	}
 
 	gh = gh.WithToken(c.PAT)
-	user, err := gh.WhoAmI(ctx)
 
+	user, err := gh.WhoAmI(ctx)
 	if err != nil {
 		return fmt.Errorf("unable to validate pat: %w", err)
 	}

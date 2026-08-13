@@ -105,7 +105,6 @@ func (e *emailinator) newClient() (*mail.Client, error) {
 		mail.WithSMTPAuth(mail.SMTPAuthPlain),
 		authOption,
 	)
-
 	if err != nil {
 		return nil, fmt.Errorf("unable to create email client: %w", err)
 	}

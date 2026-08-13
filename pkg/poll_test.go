@@ -56,6 +56,7 @@ func TestRunPollCreatesPollThatExecsCallbackOnInterval(t *testing.T) {
 
 			if !seenInitialTick {
 				assert.Assert(t, cmp.Equal(true, interval < time.Millisecond*5))
+
 				seenInitialTick = true
 
 				return
@@ -95,6 +96,7 @@ func TestPollClosesDoneChanAfterCancelled(t *testing.T) {
 	}
 
 	go runPoll(&p)
+
 	<-gotTickChan
 	close(cancelChan)
 	<-doneChan
@@ -123,6 +125,7 @@ func TestPollCanBeClosedUsingContext(t *testing.T) {
 	}
 
 	go runPoll(&p)
+
 	<-gotTick
 	cancel()
 	<-doneChan

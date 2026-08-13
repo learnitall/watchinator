@@ -771,7 +771,7 @@ func (gh *gitHubinator) ListIssues(
 						return nil, err
 					}
 
-					item.GitHubIssue.Labels = labels
+					item.Labels = labels
 				}
 
 				if matcher.HasBodyRegex() {
@@ -782,7 +782,7 @@ func (gh *gitHubinator) ListIssues(
 						return nil, err
 					}
 
-					item.GitHubIssue.Body = bodyText
+					item.Body = bodyText
 				}
 
 				if matches, reason := matcher.Matches(item); !matches {
@@ -799,7 +799,7 @@ func (gh *gitHubinator) ListIssues(
 					return nil, err
 				}
 
-				item.GitHubIssue.Body = bodyText
+				item.Body = bodyText
 
 				allIssues = append(allIssues, item)
 			}

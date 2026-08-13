@@ -372,6 +372,7 @@ func TestConfiginatorCanWatchForChanges(t *testing.T) {
 
 		if !viewedInitialConfig {
 			assert.Equal(t, observedConfigYAML, initialConfigYAML)
+
 			viewedInitialConfig = true
 
 			return

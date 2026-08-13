@@ -2,7 +2,7 @@
   description = "watchinator";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     flake-utils = {
       url = "github:numtide/flake-utils";
     };
@@ -21,12 +21,10 @@
       goDrv = pkgs.buildGoModule {
         pname = "watchinator";
         inherit version;
-        inherit tag;
-        inherit commit;
 
         src = self;
 
-        CGO_ENABLED = false;
+        env.CGO_ENABLED = 0;
         ldflags = [
           "-X github.com/learnitall/watchinator/cmd.commit=${commit}"
           "-X github.com/learnitall/watchinator/cmd.tag=${tag}"
@@ -100,6 +98,7 @@
       devShells.default = pkgs.mkShell {
         packages = with pkgs; [
           go
+          golangci-lint
         ];
       };
     }
