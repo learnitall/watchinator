@@ -252,7 +252,9 @@ func (w *Watch) ValidateAndPopulate(ctx context.Context, gh GitHubinator) error 
 		return fmt.Errorf("expected at least one repository")
 	}
 
-	if len(w.selectors) == 0 && len(w.bodyRegex) == 0 && len(w.RequiredLabels) == 0 && len(w.States) == 0 {
+	// These must be the exported fields: the unexported parsed forms are only populated further down.
+	if len(w.Selectors) == 0 && len(w.BodyRegex) == 0 && len(w.TitleRegex) == 0 &&
+		len(w.RequiredLabels) == 0 && len(w.States) == 0 {
 		return fmt.Errorf("expected at least one filter type")
 	}
 

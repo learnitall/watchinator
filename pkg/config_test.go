@@ -75,10 +75,11 @@ func TestConfigValidateChecksRequiredKeysNotEmpty(t *testing.T) {
 	)
 
 	checkEmpty(
-		"selectors",
+		"filters",
 		func(c *Config) {
 			c.Watches[0].Selectors = []string{}
 			c.Watches[0].BodyRegex = []string{}
+			c.Watches[0].TitleRegex = []string{}
 			c.Watches[0].RequiredLabels = []string{}
 			c.Watches[0].States = []string{}
 		},
@@ -116,6 +117,43 @@ func TestConfigValidateChecksRequiredKeysNotEmpty(t *testing.T) {
 		},
 		"port must be",
 	)
+}
+
+// Each filter type must be sufficient on its own. The parsed forms of selectors, bodyRegex and
+// titleRegex are populated during validation, so checking those instead of the fields the YAML
+// actually sets rejects every watch that relies on them.
+func TestConfigValidateAcceptsAnySingleFilterType(t *testing.T) {
+	ctx := context.Background()
+	gh := NewMockGitHubinator()
+	e := NewMockEmailinator()
+
+	for _, tc := range []struct {
+		name  string
+		apply func(*Watch)
+	}{
+		{"selectors", func(w *Watch) { w.Selectors = []string{"state==OPEN"} }},
+		{"requiredLabels", func(w *Watch) { w.RequiredLabels = []string{"bug"} }},
+		{"bodyRegex", func(w *Watch) { w.BodyRegex = []string{".*"} }},
+		{"titleRegex", func(w *Watch) { w.TitleRegex = []string{".*"} }},
+		{"states", func(w *Watch) { w.States = []string{"OPEN"} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, cleanup, err := NewTestConfig()
+			assert.NilError(t, err)
+
+			defer cleanup()
+
+			w := c.Watches[0]
+			w.Selectors = nil
+			w.RequiredLabels = nil
+			w.BodyRegex = nil
+			w.TitleRegex = nil
+			w.States = nil
+			tc.apply(w)
+
+			assert.NilError(t, c.Validate(ctx, gh, e))
+		})
+	}
 }
 
 func TestConfigValidateEnsuresEmailPortIsTLSOrSSL(t *testing.T) {
