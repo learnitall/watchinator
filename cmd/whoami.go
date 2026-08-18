@@ -45,12 +45,18 @@ func whoAmI() {
 
 	gh := getGitHubinator().WithToken(pat)
 
-	_, err := gh.WhoAmI(ctx)
+	login, err := gh.WhoAmI(ctx)
 	if err != nil {
 		fmt.Printf("Unable to authenticate with GitHub: %s\n", err)
 
 		os.Exit(1)
 	}
 
-	logger.Info(fmt.Sprintf("Hello %s!", user))
+	// Report who the PAT actually belongs to, not who the config claims. Validate
+	// treats a mismatch as fatal; here it is only worth pointing out.
+	if login != user {
+		logger.Warn("configured user does not match the PAT's user", "configured", user, "pat", login)
+	}
+
+	logger.Info(fmt.Sprintf("Hello %s!", login))
 }
