@@ -16,3 +16,7 @@
 
 # Nix builds
 **/result
+
+# Local secrets. The config's patFile and email passwordFile point at these.
+pat.txt
+*.pat
