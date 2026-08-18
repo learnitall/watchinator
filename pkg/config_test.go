@@ -156,6 +156,26 @@ func TestConfigValidateAcceptsAnySingleFilterType(t *testing.T) {
 	}
 }
 
+// The mismatch error exists to tell the two users apart, so the labels must not be swapped.
+func TestConfigValidateReportsWhichUserIsWhichOnMismatch(t *testing.T) {
+	ctx := context.Background()
+	gh := NewMockGitHubinator()
+	e := NewMockEmailinator()
+
+	gh.WhoAmIReturn = "pat-user"
+
+	c, cleanup, err := NewTestConfig()
+	assert.NilError(t, err)
+
+	defer cleanup()
+
+	c.User = "configured-user"
+
+	err = c.Validate(ctx, gh, e)
+	assert.ErrorContains(t, err, "configured user 'configured-user'")
+	assert.ErrorContains(t, err, "PAT user 'pat-user'")
+}
+
 func TestConfigValidateEnsuresEmailPortIsTLSOrSSL(t *testing.T) {
 	ctx := context.Background()
 	gh := NewMockGitHubinator()

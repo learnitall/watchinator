@@ -455,7 +455,7 @@ func (c *Config) Validate(ctx context.Context, gh GitHubinator, e Emailinator) e
 	}
 
 	if user != c.User {
-		return fmt.Errorf("configured user '%s' does not match PAT user '%s'", user, c.User)
+		return fmt.Errorf("configured user '%s' does not match PAT user '%s'", c.User, user)
 	}
 
 	emailValidated := false
