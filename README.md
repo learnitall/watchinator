@@ -19,7 +19,7 @@ Subscribe to things on GitHub using custom filters.
 
 ```yaml
 user: your_username
-pat: your_pat
+patFile: /path/to/your_pat
 interval: 30m
 watches:
 - name: "bug issues on cilium/cilium"
@@ -87,8 +87,8 @@ In this example, we'll configure a watch that uses each of the available criteri
 top-level config fields:
 
 * **User**: Your GitHub username. This is required to ensure authentication is working properly.
-* **PAT**: A PAT which can be used to authenticate to GitHub. See the quick start section above for information on the required
-           scopes.
+* **PATFile**: Path to a file whose first line is a PAT that can be used to authenticate to GitHub. See the quick start
+                section above for information on the required scopes.
 * **Interval**: The amount of time in-between querying GitHub for issues to subscribe to. This field is parsed using
                 the function [time.ParseDuration](https://pkg.go.dev/time#ParseDuration).
 
@@ -96,7 +96,7 @@ Overall this will look like:
 
 ```yaml
 user: your_username
-pat: your_pat
+patFile: /path/to/your_pat
 interval: some_interval
 ```
 
@@ -311,16 +311,16 @@ useful, as GitHub will not notify us if we subscribe to a new issue, only when a
 configure the email action, first let's teach watchinator how to send an email from a gmail account.
 
 To do this, we first need to generate a 16 character [app-specific password](https://support.google.com/accounts/answer/185833?hl=en)
-for the account. Once we have this, we can add it into our config, along with information on how to connect to gmail's
-smtp service:
+for the account. Once we have this, we save it to its own file and point our config at it, along with information on how to
+connect to gmail's smtp service:
 
 ```yaml
 user: your_username
-pat: your_pat
+patFile: /path/to/your_pat
 interval: some_interval
 email:
   username: "myemail@gmail.com"
-  password: "1234567890123456"
+  passwordFile: /path/to/your_app_password
   host: "smtp.gmail.com"
   port: 587
 ```
