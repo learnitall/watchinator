@@ -15,6 +15,9 @@ Subscribe to things on GitHub using custom filters.
      2. For private repositories: **repo**
      3. **notifications**
 
+   It has to be a classic token. Fine-grained tokens cannot subscribe to anything; see
+   [Why classic tokens?](#why-classic-tokens) below.
+
 2. Create a new config:
 
 ```yaml
@@ -62,6 +65,55 @@ As a container:
 $ nix build '.#watchinator-image'
 $ cat result | docker load
 ```
+
+## Tokens
+
+### Why classic tokens?
+
+Watchinator subscribes by calling the GraphQL
+[updateSubscription](https://docs.github.com/en/graphql/reference/mutations#updatesubscription) mutation. That mutation
+is not available to fine-grained tokens, and no combination of permissions makes it available:
+
+```
+$ curl -s https://api.github.com/graphql -H "Authorization: bearer ${FINE_GRAINED_PAT}" \
+    -d '{"query":"mutation{updateSubscription(input:{subscribableId:\"...\",state:SUBSCRIBED}){subscribable{viewerSubscription}}}"}'
+{"data":{"updateSubscription":null},"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by personal access token"}]}
+```
+
+The classic **notifications** scope has no fine-grained equivalent. The closest account permission, **Watching**,
+advertises a `write` level but only unlocks two read endpoints (`GET /user/subscriptions` and
+`GET /users/{username}/subscriptions`). Everything that changes a subscription — the mutation above,
+`PUT /repos/{owner}/{repo}/subscription`, and the whole `/notifications` API — returns 403 for fine-grained tokens
+without an `x-accepted-github-permissions` response header, which is how GitHub signals that an endpoint is not
+reachable by fine-grained tokens at all rather than merely under-permissioned.
+
+This is not the documented "cannot contribute to public repos where the user is not a member" gap: the mutation is
+also refused on repositories the token's own user owns, even when re-asserting the subscription state the user
+already has.
+
+Reads are unaffected — `list` and `check` work fine with a fine-grained token. Only subscribing is blocked.
+
+### Is my token configured correctly?
+
+`whoami` and `validate-config` only prove that the token authenticates. Neither one checks that it can subscribe,
+because there is no way to test that without actually subscribing to something. A token with no scopes at all will
+pass both:
+
+```
+$ watchinator whoami --config ./config.yaml
+... msg="Hello your_username!"
+```
+
+To check the scopes themselves, ask GitHub what the token carries. Classic tokens report this in a response header:
+
+```
+$ curl -sI -H "Authorization: bearer $(head -n1 /path/to/your_pat)" https://api.github.com/user \
+    | grep -i '^x-oauth-scopes:'
+```
+
+The header lists whatever scopes the token was created with, comma separated. **notifications** must be present,
+along with **public_repo** or **repo**. If the command prints nothing at all, the header is absent, which means the
+token is fine-grained and subscribing will fail at runtime with `Resource not accessible by personal access token`.
 
 ## Overview
 
