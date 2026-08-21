@@ -3,7 +3,6 @@ package pkg
 import (
 	"fmt"
 	"regexp"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/labels"
 )
@@ -31,22 +30,24 @@ func SelectorAsGitHubItemMatcher(s labels.Selector) GitHubItemMatcher {
 }
 
 // BodyRegexAsGitHubItemMatcher creates a new GitHubItemMatcher from the given bodyRegex. If the given bodyRegex
-// matches on the GitHubItem's Body field, then the matcher returns true.
+// matches on the GitHubItem's Body field, then the matcher returns true. Matching is case sensitive; use the
+// regex's own (?i) flag to opt out.
 func BodyRegexAsGitHubItemMatcher(bodyRegex *regexp.Regexp) GitHubItemMatcher {
 	return GitHubItemMatcher{
 		Matcher: func(i *GitHubItem) bool {
-			return bodyRegex.Match([]byte(strings.ToLower(i.Body)))
+			return bodyRegex.MatchString(i.Body)
 		},
 		Name: fmt.Sprintf("bodyRegex: '%s'", bodyRegex.String()),
 	}
 }
 
 // TitleRegexAsGitHubItemMatcher creates a new GitHubItemMatcher from the given titleRegex. If the given titleRegex
-// matches on the GitHubItem's Title field, then the matcher returns true.
+// matches on the GitHubItem's Title field, then the matcher returns true. Matching is case sensitive; use the
+// regex's own (?i) flag to opt out.
 func TitleRegexAsGitHubItemMatcher(titleRegex *regexp.Regexp) GitHubItemMatcher {
 	return GitHubItemMatcher{
 		Matcher: func(i *GitHubItem) bool {
-			return titleRegex.Match([]byte(strings.ToLower(i.Title)))
+			return titleRegex.MatchString(i.Title)
 		},
 		Name: fmt.Sprintf("titleRegex: '%s'", titleRegex.String()),
 	}

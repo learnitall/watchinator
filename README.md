@@ -202,6 +202,10 @@ so we can make a crude regex filter to target it:
 ^Can the watchinator subscribe to this issue\?$
 ```
 
+> `bodyRegex` and `titleRegex` are matched against the text exactly as GitHub returns it, so they are case
+> sensitive. Write the pattern to match the real casing, or prefix it with `(?i)` to match regardless of case:
+> `(?i)^can the watchinator subscribe to this issue\?$`.
+
 and add it into our config:
 
 ```yaml
@@ -243,7 +247,7 @@ watches:
     - "bug"
   bodyRegex:
     - "^Can the watchinator subscribe to this issue\\?$"
-  selectors
+  selectors:
     - "number==1"
 ```
 
@@ -292,7 +296,7 @@ watches:
     - "bug"
   bodyRegex:
     - "^Can the watchinator subscribe to this issue\\?$"
-  selectors
+  selectors:
     - "number==1"
   actions:
     subscribe:
@@ -338,7 +342,7 @@ watches:
     - "bug"
   bodyRegex:
     - "^Can the watchinator subscribe to this issue\\?$"
-  selectors
+  selectors:
     - "number==1"
   actions:
     subscribe:

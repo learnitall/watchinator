@@ -36,6 +36,37 @@ func TestBodyRegexAsGitHubItemMatcherCreatesWorkingMatcher(t *testing.T) {
 	assert.Equal(t, matcher.Matcher(item), false)
 }
 
+func TestTitleRegexAsGitHubItemMatcherCreatesWorkingMatcher(t *testing.T) {
+	item := NewTestGitHubItem()
+	item.Title = "this is my issue title"
+
+	matcher := TitleRegexAsGitHubItemMatcher(regexp.MustCompile("^this"))
+	assert.Equal(t, matcher.Matcher(item), true)
+
+	item.Title = "a title"
+	assert.Equal(t, matcher.Matcher(item), false)
+}
+
+// Body and title are matched as written. Folding the subject to lowercase, as this used to do,
+// means a pattern containing any capital can never match, silently.
+func TestRegexMatchersAreCaseSensitive(t *testing.T) {
+	item := NewTestGitHubItem()
+	item.Body = "Can the watchinator subscribe to this issue?"
+	item.Title = "This is a Test Issue"
+
+	match := func(m GitHubItemMatcher) bool { return m.Matcher(item) }
+
+	assert.Equal(t, match(BodyRegexAsGitHubItemMatcher(regexp.MustCompile("^Can the"))), true)
+	assert.Equal(t, match(BodyRegexAsGitHubItemMatcher(regexp.MustCompile("^can the"))), false)
+
+	assert.Equal(t, match(TitleRegexAsGitHubItemMatcher(regexp.MustCompile("^This is"))), true)
+	assert.Equal(t, match(TitleRegexAsGitHubItemMatcher(regexp.MustCompile("^this is"))), false)
+
+	// Case insensitivity is opt-in, through the regex rather than the matcher.
+	assert.Equal(t, match(BodyRegexAsGitHubItemMatcher(regexp.MustCompile("(?i)^can the"))), true)
+	assert.Equal(t, match(TitleRegexAsGitHubItemMatcher(regexp.MustCompile("(?i)^this is"))), true)
+}
+
 func TestRequiredLabelAsGitHubItemMatcherCreatesWorkingMatcher(t *testing.T) {
 	item := NewTestGitHubItem()
 	item.Labels = []string{"a cool label"}
