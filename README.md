@@ -2,7 +2,6 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/learnitall/watchinator.svg)](https://pkg.go.dev/github.com/learnitall/watchinator)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/learnitall/watchinator/blob/main/LICENSE)
-[![Report Card](https://goreportcard.com/badge/github.com/learnitall/watchinator)](https://goreportcard.com/report/github.com/learnitall/watchinator)
 [![Release](https://img.shields.io/github/release/learnitall/watchinator.svg)](https://github.com/learnitall/watchinator/releases/latest)
 
 Subscribe to things on GitHub using custom filters.
