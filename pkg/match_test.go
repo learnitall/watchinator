@@ -47,8 +47,6 @@ func TestTitleRegexAsGitHubItemMatcherCreatesWorkingMatcher(t *testing.T) {
 	assert.Equal(t, matcher.Matcher(item), false)
 }
 
-// Body and title are matched as written. Folding the subject to lowercase, as this used to do,
-// means a pattern containing any capital can never match, silently.
 func TestRegexMatchersAreCaseSensitive(t *testing.T) {
 	item := NewTestGitHubItem()
 	item.Body = "Can the watchinator subscribe to this issue?"

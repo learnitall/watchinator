@@ -119,9 +119,6 @@ func TestConfigValidateChecksRequiredKeysNotEmpty(t *testing.T) {
 	)
 }
 
-// Each filter type must be sufficient on its own. The parsed forms of selectors, bodyRegex and
-// titleRegex are populated during validation, so checking those instead of the fields the YAML
-// actually sets rejects every watch that relies on them.
 func TestConfigValidateAcceptsAnySingleFilterType(t *testing.T) {
 	ctx := context.Background()
 	gh := NewMockGitHubinator()
@@ -156,7 +153,6 @@ func TestConfigValidateAcceptsAnySingleFilterType(t *testing.T) {
 	}
 }
 
-// The mismatch error exists to tell the two users apart, so the labels must not be swapped.
 func TestConfigValidateReportsWhichUserIsWhichOnMismatch(t *testing.T) {
 	ctx := context.Background()
 	gh := NewMockGitHubinator()

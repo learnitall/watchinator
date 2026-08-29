@@ -11,12 +11,11 @@ Subscribe to things on GitHub using custom filters.
 
 1. Create a GitHub PAT (classic) to allow watchinator to view and subscribe to things on your behalf.
    The following scopes are needed:
-     1. For public repositories: **public_repo**
-     2. For private repositories: **repo**
-     3. **notifications**
+   1. For public repositories: **public_repo**
+   2. For private repositories: **repo**
+   3. **notifications**
 
-   It has to be a classic token. Fine-grained tokens cannot subscribe to anything; see
-   [Why classic tokens?](#why-classic-tokens) below.
+   It has to be a classic token since fine-grained tokens cannot be used to subscribe to anything.
 
 2. Create a new config:
 
@@ -25,95 +24,46 @@ user: your_username
 patFile: /path/to/your_pat
 interval: 30m
 watches:
-- name: "bug issues on cilium/cilium"
-  repos:
-    - name: "cilium"
-      owner: "cilium"
-  states:
-    - OPEN
-  requiredLabels:
-    - "bug"
-  searchLabels:
-    - "bug"
-  actions:
-    subscribe:
-      enabled: true
+  - name: "bug issues on cilium/cilium"
+    repos:
+      - name: "cilium"
+        owner: "cilium"
+    states:
+      - OPEN
+    requiredLabels:
+      - "bug"
+    searchLabels:
+      - "bug"
+    actions:
+      subscribe:
+        enabled: true
 ```
 
-3. Validate the config:
+1. Validate the config:
 
 ```
-$ go run . validate-config --config ./config.yaml
-$ go run . whoami --config ./config.yaml
+go run . validate-config --config ./config.yaml
+go run . whoami --config ./config.yaml
 ```
 
-4. Run:
+1. Run:
 
 ```
-$ go run . watch --config ./config.yaml
+go run . watch --config ./config.yaml
 ```
 
 To build and run using nix:
 
 ```
-$ nix run '.#watchinator'
+nix run '.#watchinator'
 ```
 
 As a container:
 
 ```
-$ nix build '.#watchinator-image'
-$ cat result | docker load
+nix build '.#watchinator-image'
+cat result | docker load
 ```
-
-## Tokens
-
-### Why classic tokens?
-
-Watchinator subscribes by calling the GraphQL
-[updateSubscription](https://docs.github.com/en/graphql/reference/mutations#updatesubscription) mutation. That mutation
-is not available to fine-grained tokens, and no combination of permissions makes it available:
-
-```
-$ curl -s https://api.github.com/graphql -H "Authorization: bearer ${FINE_GRAINED_PAT}" \
-    -d '{"query":"mutation{updateSubscription(input:{subscribableId:\"...\",state:SUBSCRIBED}){subscribable{viewerSubscription}}}"}'
-{"data":{"updateSubscription":null},"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by personal access token"}]}
-```
-
-The classic **notifications** scope has no fine-grained equivalent. The closest account permission, **Watching**,
-advertises a `write` level but only unlocks two read endpoints (`GET /user/subscriptions` and
-`GET /users/{username}/subscriptions`). Everything that changes a subscription — the mutation above,
-`PUT /repos/{owner}/{repo}/subscription`, and the whole `/notifications` API — returns 403 for fine-grained tokens
-without an `x-accepted-github-permissions` response header, which is how GitHub signals that an endpoint is not
-reachable by fine-grained tokens at all rather than merely under-permissioned.
-
-This is not the documented "cannot contribute to public repos where the user is not a member" gap: the mutation is
-also refused on repositories the token's own user owns, even when re-asserting the subscription state the user
-already has.
-
-Reads are unaffected — `list` and `check` work fine with a fine-grained token. Only subscribing is blocked.
-
-### Is my token configured correctly?
-
-`whoami` and `validate-config` only prove that the token authenticates. Neither one checks that it can subscribe,
-because there is no way to test that without actually subscribing to something. A token with no scopes at all will
-pass both:
-
-```
-$ watchinator whoami --config ./config.yaml
-... msg="Hello your_username!"
-```
-
-To check the scopes themselves, ask GitHub what the token carries. Classic tokens report this in a response header:
-
-```
-$ curl -sI -H "Authorization: bearer $(head -n1 /path/to/your_pat)" https://api.github.com/user \
-    | grep -i '^x-oauth-scopes:'
-```
-
-The header lists whatever scopes the token was created with, comma separated. **notifications** must be present,
-along with **public_repo** or **repo**. If the command prints nothing at all, the header is absent, which means the
-token is fine-grained and subscribing will fail at runtime with `Resource not accessible by personal access token`.
 
 ## Overview
 
@@ -138,11 +88,11 @@ the watch's configured repositories, and a set of actions which will be performe
 In this example, we'll configure a watch that uses each of the available criteria. We first need to start by populating our
 top-level config fields:
 
-* **User**: Your GitHub username. This is required to ensure authentication is working properly.
-* **PATFile**: Path to a file whose first line is a PAT that can be used to authenticate to GitHub. See the quick start
-                section above for information on the required scopes.
-* **Interval**: The amount of time in-between querying GitHub for issues to subscribe to. This field is parsed using
-                the function [time.ParseDuration](https://pkg.go.dev/time#ParseDuration).
+- **User**: Your GitHub username. This is required to ensure authentication is working properly.
+- **PAT File**: Path to a file whose first line is a PAT that can be used to authenticate to GitHub. See the quick start
+  section above for information on the required scopes.
+- **Interval**: The amount of time in-between querying GitHub for issues to subscribe to. This field is parsed using
+  the function [time.ParseDuration](https://pkg.go.dev/time#ParseDuration).
 
 Overall this will look like:
 
@@ -163,30 +113,30 @@ Now let's create our 'Watch'. Let's start by giving our watch a name. Each 'Watc
 is referenced in debug logs (toggle-able with `--verbose`).
 
 ```yaml
-watches: 
-- name: "example" 
+watches:
+  - name: "example"
 ```
 
 Next we can specify our repository. In this case, we can use "learnitall/watchinator"
 
 ```yaml
 watches:
-- name: "example"
-  repos:
-    - name: "watchinator"
-      owner: "learnitall"
+  - name: "example"
+    repos:
+      - name: "watchinator"
+        owner: "learnitall"
 ```
 
 Let's add our first filter by using the 'states' option to only target issues that are currently open:
 
 ```yaml
 watches:
-- name: "example"
-  repos:
-    - name: "watchinator"
-      owner: "learnitall"
-  states:
-    - OPEN
+  - name: "example"
+    repos:
+      - name: "watchinator"
+        owner: "learnitall"
+    states:
+      - OPEN
 ```
 
 Watchinator uses the [shurcooL/githubv4](https://github.com/shurcooL/githubv4) library in the background to perform
@@ -196,7 +146,7 @@ queries against GitHub's GraphQL API. As such, the valid options for the state f
 Now that we have a watch with at least one filter, we can use watchinator's 'list' subcommand to test it out:
 
 ```
-$ go run . list example --config ./config.yaml
+go run . list example --config ./config.yaml
 ```
 
 > The output here is in JSON, so feel free to pipe it to jq.
@@ -209,15 +159,15 @@ of these labels by adding a 'requiredLabels' field to our config:
 
 ```yaml
 watches:
-- name: "example"
-  repos:
-    - name: "watchinator"
-      owner: "learnitall"
-  states:
-    - OPEN
-  requiredLabels:
-    - "bug"
-    - "wontfix"
+  - name: "example"
+    repos:
+      - name: "watchinator"
+        owner: "learnitall"
+    states:
+      - OPEN
+    requiredLabels:
+      - "bug"
+      - "wontfix"
 ```
 
 For repositories with lots of issues, we can tone down the number of requests made to GitHub by also configuring the
@@ -226,17 +176,17 @@ labels:
 
 ```yaml
 watches:
-- name: "example"
-  repos:
-    - name: "watchinator"
-      owner: "learnitall"
-  states:
-    - OPEN
-  requiredLabels:
-    - "bug"
-    - "wontfix"
-  searchLabels:
-    - "bug"
+  - name: "example"
+    repos:
+      - name: "watchinator"
+        owner: "learnitall"
+    states:
+      - OPEN
+    requiredLabels:
+      - "bug"
+      - "wontfix"
+    searchLabels:
+      - "bug"
 ```
 
 > Some filters are available within the GitHub API, such as states and search labels. Others are implemented in the
@@ -262,19 +212,19 @@ and add it into our config:
 
 ```yaml
 watches:
-- name: "example"
-  repos:
-    - name: "watchinator"
-      owner: "learnitall"
-  states:
-    - OPEN
-  requiredLabels:
-    - "bug"
-    - "wontfix"
-  searchLabels:
-    - "bug"
-  bodyRegex:
-    - "^Can the watchinator subscribe to this issue\\?$"
+  - name: "example"
+    repos:
+      - name: "watchinator"
+        owner: "learnitall"
+    states:
+      - OPEN
+    requiredLabels:
+      - "bug"
+      - "wontfix"
+    searchLabels:
+      - "bug"
+    bodyRegex:
+      - "^Can the watchinator subscribe to this issue\\?$"
 ```
 
 This is a pretty specific set of criteria, but we can be incredibly specific by adding a metadata selector. After each
@@ -286,21 +236,21 @@ In this case, we can select the issue's number:
 
 ```yaml
 watches:
-- name: "example"
-  repos:
-    - name: "watchinator"
-      owner: "learnitall"
-  states:
-    - OPEN
-  requiredLabels:
-    - "bug"
-    - "wontfix"
-  searchLabels:
-    - "bug"
-  bodyRegex:
-    - "^Can the watchinator subscribe to this issue\\?$"
-  selectors:
-    - "number==1"
+  - name: "example"
+    repos:
+      - name: "watchinator"
+        owner: "learnitall"
+    states:
+      - OPEN
+    requiredLabels:
+      - "bug"
+      - "wontfix"
+    searchLabels:
+      - "bug"
+    bodyRegex:
+      - "^Can the watchinator subscribe to this issue\\?$"
+    selectors:
+      - "number==1"
 ```
 
 Running a 'list' should return only a single issue:
@@ -312,10 +262,7 @@ Running a 'list' should return only a single issue:
       "login": "learnitall"
     },
     "body": "Can the watchinator subscribe to this issue?",
-    "labels": [
-      "bug",
-      "wontfix"
-    ],
+    "labels": ["bug", "wontfix"],
     "number": 1,
     "state": "OPEN",
     "title": "This is a Test Issue",
@@ -335,24 +282,24 @@ subscribed to matched issues:
 
 ```yaml
 watches:
-- name: "example"
-  repos:
-    - name: "watchinator"
-      owner: "learnitall"
-  states:
-    - OPEN
-  requiredLabels:
-    - "bug"
-    - "wontfix"
-  searchLabels:
-    - "bug"
-  bodyRegex:
-    - "^Can the watchinator subscribe to this issue\\?$"
-  selectors:
-    - "number==1"
-  actions:
-    subscribe:
-      enabled: true
+  - name: "example"
+    repos:
+      - name: "watchinator"
+        owner: "learnitall"
+    states:
+      - OPEN
+    requiredLabels:
+      - "bug"
+      - "wontfix"
+    searchLabels:
+      - "bug"
+    bodyRegex:
+      - "^Can the watchinator subscribe to this issue\\?$"
+    selectors:
+      - "number==1"
+    actions:
+      subscribe:
+        enabled: true
 ```
 
 This action will be performed when watchinator is kicked off using the 'watch' subcommand, which will continually poll GitHub
@@ -405,12 +352,16 @@ watches:
 ```
 
 The next time watchinator is started using the 'watch' subcommand, when it finds an issue on GitHub that we haven't subscribed to yet
-that matches our criteria it will send an email to "myotheremail@gmail.com" from "myemail@gmail.com" containing the issue formatted
+that matches our criteria it will send an email to "<myotheremail@gmail.com>" from "<myemail@gmail.com>" containing the issue formatted
 as JSON.
 
 ## Installation
 
-> To be filled out
+The provided `Nix` `flake` in this repo contains a [home-manager](https://github.com/nix-community/home-manager) module
+that sets up a systemd user service to run watchinator in the background.
+
+The flake also contains a build target for a container image if that's more your
+style.
 
 ## Development
 
@@ -423,7 +374,7 @@ to build both the watchinator binary and container image.
 
 The following variables should be set a build-time using ldflags:
 
-* `github.com/learnitall/watchinator/cmd.commit`: The current git commit SHA at the time of build, or 'dirty' if the git
+- `github.com/learnitall/watchinator/cmd.commit`: The current git commit SHA at the time of build, or 'dirty' if the git
   working tree is dirty.
-* `github.com/learnitall/watchinator/cmd.tag`: The git tag the build is based off of. This should be the same as the
+- `github.com/learnitall/watchinator/cmd.tag`: The git tag the build is based off of. This should be the same as the
   binary's associated container image tag.
