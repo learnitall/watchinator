@@ -330,6 +330,7 @@ func (w *Watch) ValidateAndPopulate(ctx context.Context, gh GitHubinator) error 
 		}
 	}
 
+	types := w.GetTypes()
 	for _, s := range w.States {
 		switch GitHubItemState(s) {
 		case GitHubItemStateOpen, GitHubItemStateClosed:
@@ -337,7 +338,7 @@ func (w *Watch) ValidateAndPopulate(ctx context.Context, gh GitHubinator) error 
 		case GitHubItemStateMerged:
 			// Only pull requests are ever MERGED, so an issue-only watch asking for
 			// it would match nothing at all.
-			if len(w.Types) == 1 && w.Types[0] == GitHubItemIssue {
+			if len(types) == 1 && types[0] == GitHubItemIssue {
 				return fmt.Errorf("state MERGED is not reachable for a watch limited to issues")
 			}
 
@@ -355,12 +356,26 @@ func (w *Watch) ValidateAndPopulate(ctx context.Context, gh GitHubinator) error 
 }
 
 // GetTypes returns the item types the Watch covers, defaulting to every type.
+// Duplicates are dropped, first occurrence winning: callers treat a single entry
+// as "narrow to this type", so a repeated value would silently widen the watch.
 func (w *Watch) GetTypes() []GitHubItemType {
 	if len(w.Types) == 0 {
 		return []GitHubItemType{GitHubItemIssue, GitHubItemPullRequest}
 	}
 
-	return w.Types
+	types := make([]GitHubItemType, 0, len(w.Types))
+	seen := make(map[GitHubItemType]struct{}, len(w.Types))
+
+	for _, ty := range w.Types {
+		if _, ok := seen[ty]; ok {
+			continue
+		}
+
+		seen[ty] = struct{}{}
+		types = append(types, ty)
+	}
+
+	return types
 }
 
 // GetSearchFilter returns a GitHubSearchFilter based on the Watch's scope, Types,

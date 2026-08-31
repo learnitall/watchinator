@@ -474,6 +474,23 @@ func TestWatchGetTypesDefaultsToBoth(t *testing.T) {
 	)
 }
 
+// Callers read a single type as "narrow to this type", so a repeated value must
+// not survive and inflate the length past the checks keyed on it.
+func TestWatchGetTypesDeduplicates(t *testing.T) {
+	w := NewTestWatch()
+	w.Types = []GitHubItemType{GitHubItemIssue, GitHubItemIssue}
+
+	assert.DeepEqual(t, w.GetTypes(), []GitHubItemType{GitHubItemIssue})
+
+	w.Types = []GitHubItemType{
+		GitHubItemPullRequest, GitHubItemIssue, GitHubItemPullRequest,
+	}
+
+	assert.DeepEqual(
+		t, w.GetTypes(), []GitHubItemType{GitHubItemPullRequest, GitHubItemIssue},
+	)
+}
+
 func TestWatchValidateRejectsUnknownType(t *testing.T) {
 	ctx := context.Background()
 	gh := NewMockGitHubinator()
@@ -497,6 +514,31 @@ func TestWatchValidateRejectsMergedOnIssueOnlyWatch(t *testing.T) {
 	assert.ErrorContains(t, w.ValidateAndPopulate(ctx, gh), "not reachable")
 
 	w.Types = []GitHubItemType{GitHubItemIssue, GitHubItemPullRequest}
+	assert.NilError(t, w.ValidateAndPopulate(ctx, gh))
+}
+
+// A duplicated issue type is still an issue-only watch, so MERGED is as
+// unreachable as it is for a single entry.
+func TestWatchValidateRejectsMergedOnDuplicatedIssueType(t *testing.T) {
+	ctx := context.Background()
+	gh := NewMockGitHubinator()
+	w := NewTestWatch()
+
+	w.Types = []GitHubItemType{GitHubItemIssue, GitHubItemIssue}
+	w.States = []string{"MERGED"}
+
+	assert.ErrorContains(t, w.ValidateAndPopulate(ctx, gh), "not reachable")
+}
+
+// An unset types covers pull requests too, so MERGED stays reachable.
+func TestWatchValidateAcceptsMergedWithUnsetTypes(t *testing.T) {
+	ctx := context.Background()
+	gh := NewMockGitHubinator()
+	w := NewTestWatch()
+
+	w.Types = nil
+	w.States = []string{"MERGED"}
+
 	assert.NilError(t, w.ValidateAndPopulate(ctx, gh))
 }
 
