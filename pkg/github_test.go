@@ -158,16 +158,40 @@ func TestPullRequestNodeAsGitHubItemCarriesMergedState(t *testing.T) {
 	assert.Equal(t, item.State, GitHubItemStateMerged)
 }
 
-// Only one inline fragment decodes per node; the other stays zero.
-func TestSearchNodePicksWhicheverFragmentDecoded(t *testing.T) {
-	issueNode := &gitHubSearchNode{}
-	issueNode.Issue.ID = githubv4.ID("i1")
-	assert.Equal(t, issueNode.asGitHubItem().Type, GitHubItemIssue)
+// GraphQL returns a flat object for a union node and the decoder assigns by
+// field name, so a PullRequest result populates the Issue struct too: both
+// fragments select the same field names. Only __typename distinguishes them, and
+// picking the first non-zero fragment reported every PR as an issue.
+func TestSearchNodeUsesTypenameNotWhichFragmentLooksFilled(t *testing.T) {
+	// Both fragments populated, exactly as the decoder leaves them on the wire.
+	node := &gitHubSearchNode{Typename: "PullRequest"}
+	node.Issue.ID = githubv4.ID("shared")
+	node.Issue.Number = 3
+	node.Issue.State = githubv4.IssueStateOpen
+	node.PullRequest.ID = githubv4.ID("shared")
+	node.PullRequest.Number = 3
+	node.PullRequest.State = githubv4.PullRequestStateMerged
 
-	prNode := &gitHubSearchNode{}
-	prNode.PullRequest.ID = githubv4.ID("p1")
-	assert.Equal(t, prNode.asGitHubItem().Type, GitHubItemPullRequest)
+	item := node.asGitHubItem()
+	assert.Assert(t, item != nil)
+	assert.Equal(t, item.Type, GitHubItemPullRequest)
+	// Taking the wrong fragment would also report the wrong state.
+	assert.Equal(t, item.State, GitHubItemStateMerged)
 
+	node.Typename = "Issue"
+	item = node.asGitHubItem()
+	assert.Assert(t, item != nil)
+	assert.Equal(t, item.Type, GitHubItemIssue)
+	assert.Equal(t, item.State, GitHubItemStateOpen)
+}
+
+// search type ISSUE can also return other node kinds; anything unrecognised is
+// dropped rather than guessed at.
+func TestSearchNodeDropsUnknownTypename(t *testing.T) {
+	node := &gitHubSearchNode{Typename: "Discussion"}
+	node.Issue.ID = githubv4.ID("x")
+
+	assert.Assert(t, node.asGitHubItem() == nil)
 	assert.Assert(t, (&gitHubSearchNode{}).asGitHubItem() == nil)
 }
 
@@ -211,6 +235,8 @@ func TestSearchQueryRequestsBothFragments(t *testing.T) {
 
 	assert.Assert(t, strings.Contains(parsed.Query, "... on Issue{"), parsed.Query)
 	assert.Assert(t, strings.Contains(parsed.Query, "... on PullRequest{"), parsed.Query)
+	// Without __typename the two fragments are indistinguishable once decoded.
+	assert.Assert(t, strings.Contains(parsed.Query, "__typename"), parsed.Query)
 	assert.Assert(t, strings.Contains(parsed.Query, "$searchType:SearchType!"), parsed.Query)
 	// Labels and body come inline; a regression to per-item queries would show up
 	// as these disappearing from the document.

@@ -417,20 +417,28 @@ func (n *gitHubPullRequestNode) asGitHubItem() *GitHubItem {
 }
 
 // gitHubSearchNode is one result of a search. type ISSUE spans issues and pull
-// requests, so both fragments are always requested and the query string decides
-// which of them decodes.
+// requests, so both fragments are always requested.
+//
+// The concrete type has to come from __typename. GraphQL returns a flat object
+// for the matching fragment, and the decoder assigns by field name, so an Issue
+// and a PullRequest selecting the same field names both populate *both* structs.
+// Deciding by which one looks filled in reports every pull request as an issue.
 type gitHubSearchNode struct {
+	Typename    githubv4.String       `graphql:"__typename"`
 	Issue       gitHubIssueNode       `graphql:"... on Issue"`
 	PullRequest gitHubPullRequestNode `graphql:"... on PullRequest"`
 }
 
-// asGitHubItem picks whichever fragment actually decoded for this node.
+// asGitHubItem converts whichever fragment __typename names.
 func (n *gitHubSearchNode) asGitHubItem() *GitHubItem {
-	if item := n.Issue.asGitHubItem(); item != nil {
-		return item
+	switch n.Typename {
+	case "Issue":
+		return n.Issue.asGitHubItem()
+	case "PullRequest":
+		return n.PullRequest.asGitHubItem()
+	default:
+		return nil
 	}
-
-	return n.PullRequest.asGitHubItem()
 }
 
 // gitHubSearchQuery queries GitHub's search connection for items matching a
