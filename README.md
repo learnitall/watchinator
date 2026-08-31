@@ -119,9 +119,35 @@ query per poll, covering every repository and organization in the watch at once.
 - **Search is rate-limited separately** from the rest of the GraphQL API, and its index lags the API slightly, so a brand
   new item can take a moment to show up.
 
-Criteria that search cannot express are applied locally after the results come back. Note that all criteria are ANDed: two
-`titleRegex` entries mean the title must match *both*. Use one regex with alternation for an OR, and separate watches to
-match a term in either the title or the body.
+Criteria that search cannot express are applied locally after the results come back. Most criteria are ANDed: two
+`titleRegex` entries mean the title must match *both*, and the same holds for `bodyRegex` and `selectors`. Use one regex
+with alternation for an OR, and separate watches to match a term in either the title or the body. Labels are the
+exception, and the two label fields do not agree with each other; see below.
+
+### Labels: AND vs OR
+
+- `requiredLabels` — the item must carry **every** label listed. GitHub enforces this: each entry becomes its own
+  `label:` qualifier, and repeated `label:` qualifiers are ANDed. Matching is case-insensitive, because that is
+  GitHub's behaviour, so `Bug` and `bug` are the same label here.
+- `searchLabels` — the item needs **at least one** of the labels listed. The entries are rendered as a single
+  comma-joined `label:` qualifier, and GitHub ORs the values within one qualifier. They are deliberately not
+  re-checked locally, so this field only ever widens what search returns.
+
+```yaml
+watches:
+  - name: "example"
+    requiredLabels:  # must have bug AND wontfix
+      - "bug"
+      - "wontfix"
+    searchLabels:    # must have bug OR enhancement
+      - "bug"
+      - "enhancement"
+```
+
+> **Upgrading:** `searchLabels` used to AND. The old connection passed them through `IssueFilters.labels`, which
+> requires all of them, so a watch listing several `searchLabels` matched the intersection. It now matches the union,
+> a strictly larger set: expect more subscriptions and more email. Move any label you genuinely require into
+> `requiredLabels`.
 
 ### Example
 
