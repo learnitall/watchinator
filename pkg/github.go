@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -102,40 +103,50 @@ func NewTestGitHubIssue() *GitHubIssue {
 	}
 }
 
-// GitHubIssueFilter is a filter that can be used when listing issues on GitHub.
-// It is associated with (but decoupled from) the following GraphQL input object:
-// https://docs.github.com/en/graphql/reference/input-objects#issuefilters.
+// GitHubIssueFilter narrows which items GitHub returns before any client-side
+// matching runs. It is rendered into a GitHub search query string.
 type GitHubIssueFilter struct {
 	Labels []string
 	States []string
 }
 
-// asGithubv4IssueFilters converts the GitHubIssueFilter into a githubv4.IssueFilters struct for usage in the
-// githubv4 GraphQL library. It performs specific type conversions and formats issue states in all caps.
-func (f *GitHubIssueFilter) asGithubv4IssueFilters() githubv4.IssueFilters {
-	var labels *[]githubv4.String = nil
+// quoteSearchTerm wraps a value in quotes when it holds characters that would
+// otherwise terminate the qualifier.
+func quoteSearchTerm(s string) string {
+	if !strings.ContainsAny(s, " \t\"") {
+		return s
+	}
 
-	if f.Labels != nil {
-		labels = &[]githubv4.String{}
+	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+}
+
+// asSearchQuery renders the filter as a GitHub search query scoped to ghr.
+// Values comma-joined inside a single qualifier are ORed by GitHub, which is the
+// semantic SearchLabels documents ("at least one of these labels"). Note that
+// the repository.issues connection this replaced ANDed them instead.
+func (f *GitHubIssueFilter) asSearchQuery(ghr GitHubRepository) string {
+	terms := []string{
+		"repo:" + quoteSearchTerm(ghr.Owner+"/"+ghr.Name),
+		// search type ISSUE covers pull requests too; this keeps it to issues.
+		"is:issue",
+	}
+
+	if len(f.Labels) > 0 {
+		quoted := make([]string, 0, len(f.Labels))
 		for _, l := range f.Labels {
-			*labels = append(*labels, githubv4.String(l))
+			quoted = append(quoted, quoteSearchTerm(l))
 		}
+
+		terms = append(terms, "label:"+strings.Join(quoted, ","))
 	}
 
-	var states *[]githubv4.IssueState = nil
-
-	if f.States != nil {
-		states = &[]githubv4.IssueState{}
-		for _, s := range f.States {
-			// GitHub expects these to be in all caps
-			*states = append(*states, githubv4.IssueState(s))
-		}
+	// Repeated state qualifiers AND into a contradiction, and naming every state
+	// is the same as not filtering, so only a lone state narrows anything.
+	if len(f.States) == 1 {
+		terms = append(terms, "state:"+strings.ToLower(f.States[0]))
 	}
 
-	return githubv4.IssueFilters{
-		Labels: labels,
-		States: states,
-	}
+	return strings.Join(terms, " ")
 }
 
 // GitHubItem is a container sturct holding different items that can be queried on GitHub. It is used to provide
@@ -254,173 +265,117 @@ func (v *gitHubRepositoryQueryVars) AsMap() map[string]any {
 	}
 }
 
-// gitHubLabelQuery is used to query GitHub's graphql API for labels on an issue.
-type gitHubLabelQuery struct {
+// searchResultLimit is the ceiling GitHub's search API paginates to, regardless
+// of how many items actually matched.
+const searchResultLimit = 1000
+
+// gitHubIssueNode is the `... on Issue` fragment of a search result. Search
+// returns the body and labels inline, so unlike the repository.issues connection
+// this replaces, listing costs one request per page instead of one per page plus
+// two per item.
+type gitHubIssueNode struct {
+	Author             GitHubActor
+	ID                 githubv4.ID
+	Number             githubv4.Int
+	Title              githubv4.String
+	BodyText           githubv4.String
+	State              githubv4.IssueState
+	UpdatedAt          githubv4.DateTime
+	ViewerSubscription githubv4.SubscriptionState
+	// Inline labels are not paginated, so an item carrying more than this loses
+	// the tail and requiredLabels could miss. No repository we watch is close.
+	Labels struct {
+		Nodes []struct {
+			Name githubv4.String
+		}
+	} `graphql:"labels(first: 100)"`
 	Repository struct {
-		Issue struct {
-			Labels struct {
-				Nodes []struct {
-					Name string
-				}
-				PageInfo struct {
-					EndCursor   githubv4.String
-					HasNextPage githubv4.Boolean
-				}
-			} `graphql:"labels(first: $n, after: $labelsCursor)"`
-		} `graphql:"issue(number: $issueNumber)"`
-	} `graphql:"repository(owner: $owner, name: $name)"`
-}
-
-func (q gitHubLabelQuery) LogValue() slog.Value {
-	return slog.GroupValue(
-		slog.String("endCursor", string(q.Repository.Issue.Labels.PageInfo.EndCursor)),
-		slog.Bool("hasNextPage", bool(q.Repository.Issue.Labels.PageInfo.HasNextPage)),
-		slog.Any("nodes", q.Repository.Issue.Labels.Nodes),
-	)
-}
-
-// gitHubLabelQueryVars represents the variables that can be passed to a gitHubLabelQuery.
-type gitHubLabelQueryVars struct {
-	Owner        githubv4.String
-	Name         githubv4.String
-	IssueNumber  githubv4.Int
-	N            githubv4.Int
-	LabelsCursor *githubv4.String
-}
-
-func (v *gitHubLabelQueryVars) AsMap() map[string]any {
-	return map[string]any{
-		"owner":        v.Owner,
-		"name":         v.Name,
-		"issueNumber":  v.IssueNumber,
-		"n":            v.N,
-		"labelsCursor": v.LabelsCursor,
+		Name  githubv4.String
+		Owner struct {
+			Login githubv4.String
+		}
 	}
 }
 
-func (v gitHubLabelQueryVars) LogValue() slog.Value {
-	return slog.GroupValue(
-		slog.String("owner", string(v.Owner)),
-		slog.String("name", string(v.Name)),
-		slog.Int("issueNumber", int(v.IssueNumber)),
-		slog.Int("n", int(v.N)),
-		slog.Any("labelsCursor", v.LabelsCursor),
-	)
-}
-
-type gitHubIssueBodyQuery struct {
-	Repository struct {
-		Issue struct {
-			BodyText githubv4.String
-		} `graphql:"issue(number: $issueNumber)"`
-	} `graphql:"repository(owner: $owner, name: $name)"`
-}
-
-func (q gitHubIssueBodyQuery) LogValue() slog.Value {
-	return slog.GroupValue(
-		slog.String("bodyText", string(q.Repository.Issue.BodyText)),
-	)
-}
-
-type gitHubIssueBodyQueryVars struct {
-	Owner       githubv4.String
-	Name        githubv4.String
-	IssueNumber githubv4.Int
-}
-
-func (v *gitHubIssueBodyQueryVars) AsMap() map[string]any {
-	return map[string]any{
-		"owner":       v.Owner,
-		"name":        v.Name,
-		"issueNumber": v.IssueNumber,
+// asGitHubItem converts the node into a GitHubItem. It returns nil for a zero
+// node, which is what an unmatched inline fragment in the result union decodes to.
+func (n *gitHubIssueNode) asGitHubItem() *GitHubItem {
+	if n.ID == nil || n.ID == "" {
+		return nil
 	}
-}
 
-func (v gitHubIssueBodyQueryVars) LogValue() slog.Value {
-	return slog.GroupValue(
-		slog.String("owner", string(v.Owner)),
-		slog.String("name", string(v.Name)),
-		slog.Int("issueNumber", int(v.IssueNumber)),
-	)
-}
+	labels := make([]string, 0, len(n.Labels.Nodes))
+	for _, l := range n.Labels.Nodes {
+		labels = append(labels, string(l.Name))
+	}
 
-// gitHubIssueQuery is used to query the GitHub graphql for an issue.
-// Because the GitHub issue contains paginated labels, we need to do a special work around to query the issue and
-// labels separately to fill in a GitHubIssue struct.
-type gitHubIssueQuery struct {
-	Repository struct {
-		Issues struct {
-			Nodes []struct {
-				Author             GitHubActor
-				ID                 githubv4.ID
-				Number             githubv4.Int
-				Title              githubv4.String
-				State              githubv4.IssueState
-				UpdatedAt          githubv4.DateTime
-				ViewerSubscription githubv4.SubscriptionState
-			}
-			PageInfo struct {
-				EndCursor   githubv4.String
-				HasNextPage githubv4.Boolean
-			}
-		} `graphql:"issues(first: $n, after: $issuesCursor, filterBy: $filters)"`
-	} `graphql:"repository(owner: $owner, name: $name)"`
-}
-
-// AsGitHubIssue converts the gitHubIssueQuery into a map of the contained issues to their IDs.
-func (q *gitHubIssueQuery) AsGitHubIssues() map[githubv4.ID]*GitHubIssue {
-	issues := map[githubv4.ID]*GitHubIssue{}
-
-	for _, n := range q.Repository.Issues.Nodes {
-		issues[n.ID] = &GitHubIssue{
+	return &GitHubItem{
+		Type: GitHubItemIssue,
+		Repo: GitHubRepository{
+			Owner: string(n.Repository.Owner.Login),
+			Name:  string(n.Repository.Name),
+		},
+		ID: n.ID,
+		GitHubIssue: GitHubIssue{
 			Author:       n.Author,
-			Body:         "",
-			Labels:       []string{},
+			Body:         string(n.BodyText),
+			Labels:       labels,
 			Number:       int32(n.Number),
 			State:        n.State,
 			Subscription: n.ViewerSubscription,
 			Title:        string(n.Title),
 			UpdatedAt:    n.UpdatedAt.Time,
-		}
+		},
 	}
-
-	return issues
 }
 
-func (q gitHubIssueQuery) LogValue() slog.Value {
+// gitHubSearchQuery queries GitHub's search connection for items matching a
+// rendered query string.
+type gitHubSearchQuery struct {
+	Search struct {
+		IssueCount githubv4.Int
+		PageInfo   struct {
+			EndCursor   githubv4.String
+			HasNextPage githubv4.Boolean
+		}
+		Nodes []struct {
+			Issue gitHubIssueNode `graphql:"... on Issue"`
+		}
+	} `graphql:"search(query: $q, type: $searchType, first: $n, after: $searchCursor)"`
+}
+
+func (q gitHubSearchQuery) LogValue() slog.Value {
 	return slog.GroupValue(
-		slog.String("endCursor", string(q.Repository.Issues.PageInfo.EndCursor)),
-		slog.Bool("hasNextPage", bool(q.Repository.Issues.PageInfo.HasNextPage)),
-		slog.Any("nodes", q.Repository.Issues.Nodes),
+		slog.Int("issueCount", int(q.Search.IssueCount)),
+		slog.String("endCursor", string(q.Search.PageInfo.EndCursor)),
+		slog.Bool("hasNextPage", bool(q.Search.PageInfo.HasNextPage)),
+		slog.Int("numNodes", len(q.Search.Nodes)),
 	)
 }
 
-// gitHubIssueQueryVars represents the variables that can be passed to a gitHubIssueQuery.
-type gitHubIssueQueryVars struct {
-	Owner        githubv4.String
-	Name         githubv4.String
-	Filters      githubv4.IssueFilters
-	IssuesCursor *githubv4.String
+// gitHubSearchQueryVars represents the variables that can be passed to a gitHubSearchQuery.
+type gitHubSearchQueryVars struct {
+	Q            githubv4.String
+	Type         githubv4.SearchType
+	SearchCursor *githubv4.String
 	N            githubv4.Int
 }
 
-func (q gitHubIssueQueryVars) AsMap() map[string]any {
+func (q gitHubSearchQueryVars) AsMap() map[string]any {
 	return map[string]any{
-		"owner":        q.Owner,
-		"name":         q.Name,
-		"filters":      q.Filters,
-		"issuesCursor": q.IssuesCursor,
+		"q":            q.Q,
+		"searchType":   q.Type,
+		"searchCursor": q.SearchCursor,
 		"n":            q.N,
 	}
 }
 
-func (q gitHubIssueQueryVars) LogValue() slog.Value {
+func (q gitHubSearchQueryVars) LogValue() slog.Value {
 	return slog.GroupValue(
-		slog.String("owner", string(q.Owner)),
-		slog.String("name", string(q.Name)),
-		slog.Any("issuesCursor", q.IssuesCursor),
+		slog.String("q", string(q.Q)),
+		slog.String("searchType", string(q.Type)),
+		slog.Any("searchCursor", q.SearchCursor),
 		slog.Int("n", int(q.N)),
-		slog.Any("filters", q.Filters),
 	)
 }
 
@@ -633,87 +588,6 @@ func (gh *gitHubinator) CheckRepository(ctx context.Context, ghr GitHubRepositor
 	return nil
 }
 
-// listIssueLabels returns a list of labels for the given issue, performing pagination as needed.
-func (gh *gitHubinator) listIssueLabels(
-	ctx context.Context, ghr GitHubRepository, issueNumber int32,
-) ([]string, error) {
-	query := &gitHubLabelQuery{}
-
-	vars := gitHubLabelQueryVars{
-		Owner:        githubv4.String(ghr.Owner),
-		Name:         githubv4.String(ghr.Name),
-		IssueNumber:  githubv4.Int(issueNumber),
-		N:            100,
-		LabelsCursor: (*githubv4.String)(nil),
-	}
-
-	allLabels := []string{}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-			queryLogger := gh.logger.With("vars", vars)
-			queryLogger.Debug("executing list issue labels query")
-
-			MetricIssueLabelQueryTotal.Inc()
-
-			err := gh.client.Query(ctx, &query, vars.AsMap())
-			if err != nil {
-				queryLogger.Debug("got error on list issue labels query", LogKeyError, err)
-
-				MetricIssueLabelQueryErrorTotal.Inc()
-
-				return nil, err
-			}
-
-			queryLogger.Debug("got response on list labels query", "response", query)
-
-			for i := range query.Repository.Issue.Labels.Nodes {
-				l := query.Repository.Issue.Labels.Nodes[i]
-				allLabels = append(allLabels, l.Name)
-			}
-
-			if !query.Repository.Issue.Labels.PageInfo.HasNextPage {
-				return allLabels, nil
-			}
-
-			*vars.LabelsCursor = query.Repository.Issue.Labels.PageInfo.EndCursor
-		}
-	}
-}
-
-func (gh *gitHubinator) getIssueBody(
-	ctx context.Context, ghr GitHubRepository, issueNumber int32,
-) (string, error) {
-	query := &gitHubIssueBodyQuery{}
-
-	vars := gitHubIssueBodyQueryVars{
-		Owner:       githubv4.String(ghr.Owner),
-		Name:        githubv4.String(ghr.Name),
-		IssueNumber: githubv4.Int(issueNumber),
-	}
-
-	queryLogger := gh.logger.With("vars", vars)
-	queryLogger.Debug("executing get issue body text query")
-
-	MetricIssueBodyQueryTotal.Inc()
-
-	err := gh.client.Query(ctx, &query, vars.AsMap())
-	if err != nil {
-		queryLogger.Debug("got error on get issue body regex query", LogKeyError, err)
-
-		MetricIssueLabelQueryErrorTotal.Inc()
-
-		return "", err
-	}
-
-	queryLogger.Debug("got response on get issue body text query", "response", query)
-
-	return string(query.Repository.Issue.BodyText), nil
-}
-
 func (gh *gitHubinator) ListIssues(
 	ctx context.Context, ghr GitHubRepository, filter *GitHubIssueFilter,
 	matcher Matchinator,
@@ -722,17 +596,16 @@ func (gh *gitHubinator) ListIssues(
 		gh.setupClient()
 	}
 
-	query := &gitHubIssueQuery{}
+	query := &gitHubSearchQuery{}
 
-	vars := &gitHubIssueQueryVars{
-		Owner:        githubv4.String(ghr.Owner),
-		Name:         githubv4.String(ghr.Name),
-		Filters:      filter.asGithubv4IssueFilters(),
-		IssuesCursor: (*githubv4.String)(nil),
+	vars := &gitHubSearchQueryVars{
+		Q:            githubv4.String(filter.asSearchQuery(ghr)),
+		Type:         githubv4.SearchTypeIssue,
+		SearchCursor: (*githubv4.String)(nil),
 		N:            100,
 	}
 
-	allIssues := []*GitHubItem{}
+	allItems := []*GitHubItem{}
 
 	for {
 		select {
@@ -740,75 +613,55 @@ func (gh *gitHubinator) ListIssues(
 			return nil, ctx.Err()
 		default:
 			queryLogger := gh.logger.With("vars", vars)
-			queryLogger.Debug("executing list issues query")
+			queryLogger.Debug("executing search query")
 
-			MetricIssueQueryTotal.Inc()
+			MetricSearchQueryTotal.Inc()
 
 			err := gh.client.Query(ctx, &query, vars.AsMap())
 			if err != nil {
-				queryLogger.Debug("got error on list issues query", LogKeyError, err)
+				queryLogger.Debug("got error on search query", LogKeyError, err)
 
-				MetricIssueQueryErrorTotal.Inc()
+				MetricSearchQueryErrorTotal.Inc()
 
 				return nil, err
 			}
 
-			queryLogger.Debug("got response on list issues query", "query", query)
+			queryLogger.Debug("got response on search query", "query", query)
 
-			for id, issue := range query.AsGitHubIssues() {
-				item := &GitHubItem{
-					Type:        GitHubItemIssue,
-					Repo:        ghr,
-					ID:          id,
-					GitHubIssue: *issue,
+			// Search stops paginating at searchResultLimit no matter how many matched,
+			// so a filter this broad is silently losing its tail.
+			if count := int(query.Search.IssueCount); count > searchResultLimit {
+				queryLogger.Warn(
+					"search matched more items than GitHub will page through; narrow the watch",
+					"matched", count, "limit", searchResultLimit,
+				)
+			}
+
+			for i := range query.Search.Nodes {
+				item := query.Search.Nodes[i].Issue.asGitHubItem()
+				if item == nil {
+					continue
 				}
 
-				queryLogger.Debug("got item for list issues query", "issue", item)
-
-				if matcher.HasRequiredLabels() {
-					labels, err := gh.listIssueLabels(ctx, ghr, issue.Number)
-					if err != nil {
-						return nil, err
-					}
-
-					item.Labels = labels
-				}
-
-				if matcher.HasBodyRegex() {
-					queryLogger.Debug("getting issue body for body regex matching")
-
-					bodyText, err := gh.getIssueBody(ctx, ghr, issue.Number)
-					if err != nil {
-						return nil, err
-					}
-
-					item.Body = bodyText
-				}
+				queryLogger.Debug("got item for search query", "item", item)
 
 				if matches, reason := matcher.Matches(item); !matches {
 					queryLogger.Debug("item filtered out by the matcher", "item", item, "reason", reason)
 					MetricFilteredTotal.Inc()
 
 					continue
-				} else {
-					queryLogger.Debug("item matched", "item", item, "reason", reason)
 				}
 
-				bodyText, err := gh.getIssueBody(ctx, ghr, issue.Number)
-				if err != nil {
-					return nil, err
-				}
+				queryLogger.Debug("item matched", "item", item)
 
-				item.Body = bodyText
-
-				allIssues = append(allIssues, item)
+				allItems = append(allItems, item)
 			}
 
-			if !query.Repository.Issues.PageInfo.HasNextPage {
-				return allIssues, nil
+			if !query.Search.PageInfo.HasNextPage {
+				return allItems, nil
 			}
 
-			vars.IssuesCursor = &query.Repository.Issues.PageInfo.EndCursor
+			vars.SearchCursor = &query.Search.PageInfo.EndCursor
 		}
 	}
 }
