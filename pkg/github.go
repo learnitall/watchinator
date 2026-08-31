@@ -20,7 +20,6 @@ type GitHubItemType string
 const (
 	GitHubItemIssue       GitHubItemType = "issue"
 	GitHubItemPullRequest GitHubItemType = "pullRequest"
-	gitHubNotFoundErrStr  string         = "Could not resolve to a"
 )
 
 // GitHubNotFoundError is raised when a GitHubinator cannot find the given item. It is a special error that can be
@@ -53,13 +52,6 @@ func (r GitHubRepository) LogValue() slog.Value {
 		slog.String("owner", r.Owner),
 		slog.String("name", r.Name),
 	)
-}
-
-// GitHubLabel represents an issue or PR label on GitHub.
-// Is is associated with the following GraphQL object:
-// https://docs.github.com/en/graphql/reference/objects#label.
-type GitHubLabel struct {
-	Name string `json:"name"`
 }
 
 // GitHubItemState is the state of an item. Issues are OPEN or CLOSED; pull

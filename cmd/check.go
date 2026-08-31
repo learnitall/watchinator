@@ -40,5 +40,18 @@ func doCheck() {
 				}
 			}
 		}
+
+		for _, o := range w.Organizations {
+			if err := gh.CheckOrganization(ctx, o); err != nil {
+				fmt.Println(err)
+
+				switch err.(type) {
+				case pkg.GitHubNotFoundError:
+					os.Exit(2)
+				default:
+					os.Exit(1)
+				}
+			}
+		}
 	}
 }

@@ -105,14 +105,8 @@ type Matchinator interface {
 	// WithTitleRegexes adds the given titleRegexes to the match critieria.
 	WithTitleRegexes(titleRegexes ...*regexp.Regexp) Matchinator
 
-	// HasBodyRegex returns if a bodyRegex is part of the match criteria.
-	HasBodyRegex() bool
-
 	// WithRequiredLabels adds the given labels to the match criteria.
 	WithRequiredLabels(labels ...string) Matchinator
-
-	// HasRequiredLabels returns if a label is part of the match criteria.
-	HasRequiredLabels() bool
 
 	// WithStates adds the given states to the match criteria. An item in any one
 	// of them matches.
@@ -125,9 +119,7 @@ type Matchinator interface {
 
 // matchinator is the internal implementation of the Matchinator interface.
 type matchinator struct {
-	matchFuncs        []GitHubItemMatcher
-	hasBodyRegex      bool
-	hasRequiredLabels bool
+	matchFuncs []GitHubItemMatcher
 }
 
 func (m *matchinator) WithMatchFunc(match GitHubItemMatcher) Matchinator {
@@ -153,8 +145,6 @@ func (m *matchinator) WithBodyRegexes(bodyRegexes ...*regexp.Regexp) Matchinator
 		return m
 	}
 
-	m.hasBodyRegex = true
-
 	for _, r := range bodyRegexes {
 		m.matchFuncs = append(m.matchFuncs, BodyRegexAsGitHubItemMatcher(r))
 	}
@@ -174,26 +164,16 @@ func (m *matchinator) WithTitleRegexes(titleRegexes ...*regexp.Regexp) Matchinat
 	return m
 }
 
-func (m *matchinator) HasBodyRegex() bool {
-	return m.hasBodyRegex
-}
-
 func (m *matchinator) WithRequiredLabels(labels ...string) Matchinator {
 	if len(labels) == 0 {
 		return m
 	}
-
-	m.hasRequiredLabels = true
 
 	for _, l := range labels {
 		m.matchFuncs = append(m.matchFuncs, RequiredLabelAsGitHubItemMatcher(l))
 	}
 
 	return m
-}
-
-func (m *matchinator) HasRequiredLabels() bool {
-	return m.hasRequiredLabels
 }
 
 func (m *matchinator) WithStates(states ...GitHubItemState) Matchinator {
