@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/shurcooL/githubv4"
 	"golang.org/x/exp/slog"
 	"gopkg.in/yaml.v3"
 	"k8s.io/apimachinery/pkg/labels"
@@ -206,6 +205,8 @@ type Watch struct {
 	// Organizations to watch items from, covering every repository the org owns
 	// that the PAT can see.
 	Organizations []string `yaml:"orgs"`
+	// Types of item to watch: "issue", "pullRequest", or both. Empty means both.
+	Types []GitHubItemType `yaml:"types"`
 	// Selectors are used to specify which items to watch, follows the k8s label selector syntax.
 	// See the GitHubItem struct for valid keys and fields and
 	// https://pkg.go.dev/k8s.io/apimachinery@v0.27.1/pkg/labels#Parse for the syntax.
@@ -318,12 +319,29 @@ func (w *Watch) ValidateAndPopulate(ctx context.Context, gh GitHubinator) error 
 		w.titleRegex = append(w.titleRegex, compiled)
 	}
 
-	for _, s := range w.States {
-		switch githubv4.IssueState(s) {
-		case githubv4.IssueStateClosed, githubv4.IssueStateOpen:
+	for _, ty := range w.Types {
+		switch ty {
+		case GitHubItemIssue, GitHubItemPullRequest:
 			continue
 		default:
-			return fmt.Errorf("unknown issue state %s", s)
+			return fmt.Errorf("unknown item type %s", ty)
+		}
+	}
+
+	for _, s := range w.States {
+		switch GitHubItemState(s) {
+		case GitHubItemStateOpen, GitHubItemStateClosed:
+			continue
+		case GitHubItemStateMerged:
+			// Only pull requests are ever MERGED, so an issue-only watch asking for
+			// it would match nothing at all.
+			if len(w.Types) == 1 && w.Types[0] == GitHubItemIssue {
+				return fmt.Errorf("state MERGED is not reachable for a watch limited to issues")
+			}
+
+			continue
+		default:
+			return fmt.Errorf("unknown item state %s", s)
 		}
 	}
 
@@ -334,26 +352,44 @@ func (w *Watch) ValidateAndPopulate(ctx context.Context, gh GitHubinator) error 
 	return nil
 }
 
-// GetSearchFilter returns a GitHubSearchFilter based on the Watch's scope,
+// GetTypes returns the item types the Watch covers, defaulting to every type.
+func (w *Watch) GetTypes() []GitHubItemType {
+	if len(w.Types) == 0 {
+		return []GitHubItemType{GitHubItemIssue, GitHubItemPullRequest}
+	}
+
+	return w.Types
+}
+
+// GetSearchFilter returns a GitHubSearchFilter based on the Watch's scope, Types,
 // SearchLabels and States. It can be passed to a GitHubinator for listing items
 // that match the Watch.
 func (w *Watch) GetSearchFilter() *GitHubSearchFilter {
 	return &GitHubSearchFilter{
 		Repositories:  w.Repositories,
 		Organizations: w.Organizations,
+		Types:         w.GetTypes(),
 		Labels:        w.SearchLabels,
 		States:        w.States,
 	}
 }
 
-// GetMatchinator returns a Matchinator based on the Watch's specified BodyRegex, Selectors, and RequiredLabels fields.
-// It can be passed to a GitHubinator for listing issues that match the Watch.
+// GetMatchinator returns a Matchinator based on the Watch's specified BodyRegex, Selectors, RequiredLabels and
+// States fields. It can be passed to a GitHubinator for listing items that match the Watch.
 func (w *Watch) GetMatchinator() Matchinator {
+	states := make([]GitHubItemState, 0, len(w.States))
+	for _, s := range w.States {
+		states = append(states, GitHubItemState(s))
+	}
+
+	// States are only partly expressible as a search qualifier, so the matcher
+	// enforces them too rather than letting a multi-state watch silently widen.
 	return NewMatchinator().
 		WithBodyRegexes(w.bodyRegex...).
 		WithTitleRegexes(w.titleRegex...).
 		WithSelectors(w.selectors...).
-		WithRequiredLabels(w.RequiredLabels...)
+		WithRequiredLabels(w.RequiredLabels...).
+		WithStates(states...)
 }
 
 func (w *Watch) GetActioninator(gh GitHubinator, emailinator Emailinator) Actioninator {

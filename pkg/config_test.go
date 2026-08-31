@@ -464,3 +464,67 @@ func TestWatchValidateRejectsWatchWithNoScope(t *testing.T) {
 		t, w.ValidateAndPopulate(ctx, gh), "at least one repository or organization",
 	)
 }
+
+func TestWatchGetTypesDefaultsToBoth(t *testing.T) {
+	w := NewTestWatch()
+	w.Types = nil
+
+	assert.DeepEqual(
+		t, w.GetTypes(), []GitHubItemType{GitHubItemIssue, GitHubItemPullRequest},
+	)
+}
+
+func TestWatchValidateRejectsUnknownType(t *testing.T) {
+	ctx := context.Background()
+	gh := NewMockGitHubinator()
+	w := NewTestWatch()
+
+	w.Types = []GitHubItemType{"discussion"}
+
+	assert.ErrorContains(t, w.ValidateAndPopulate(ctx, gh), "unknown item type")
+}
+
+// Only pull requests are ever MERGED, so asking for it on an issue-only watch is
+// a config that could never match rather than one that matches nothing quietly.
+func TestWatchValidateRejectsMergedOnIssueOnlyWatch(t *testing.T) {
+	ctx := context.Background()
+	gh := NewMockGitHubinator()
+	w := NewTestWatch()
+
+	w.Types = []GitHubItemType{GitHubItemIssue}
+	w.States = []string{"MERGED"}
+
+	assert.ErrorContains(t, w.ValidateAndPopulate(ctx, gh), "not reachable")
+
+	w.Types = []GitHubItemType{GitHubItemIssue, GitHubItemPullRequest}
+	assert.NilError(t, w.ValidateAndPopulate(ctx, gh))
+}
+
+// States are only partly expressible as a search qualifier, so the matcher has to
+// enforce them or a multi-state watch would silently accept every state.
+func TestWatchMatchinatorEnforcesStates(t *testing.T) {
+	w := NewTestWatch()
+	w.Selectors = nil
+	w.RequiredLabels = nil
+	w.BodyRegex = nil
+	w.TitleRegex = nil
+	w.States = []string{"OPEN", "MERGED"}
+
+	ctx := context.Background()
+	assert.NilError(t, w.ValidateAndPopulate(ctx, NewMockGitHubinator()))
+
+	m := w.GetMatchinator()
+
+	item := NewTestGitHubItem()
+	item.State = GitHubItemStateOpen
+	matched, _ := m.Matches(item)
+	assert.Equal(t, matched, true)
+
+	item.State = GitHubItemStateMerged
+	matched, _ = m.Matches(item)
+	assert.Equal(t, matched, true)
+
+	item.State = GitHubItemStateClosed
+	matched, reason := m.Matches(item)
+	assert.Equal(t, matched, false, reason)
+}

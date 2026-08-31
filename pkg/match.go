@@ -70,6 +70,24 @@ func RequiredLabelAsGitHubItemMatcher(requiredLabel string) GitHubItemMatcher {
 	}
 }
 
+// StatesAsGitHubItemMatcher creates a GitHubItemMatcher that accepts an item in
+// any one of the given states. Unlike the other criteria this ORs internally,
+// because a set of states is a single choice rather than several requirements.
+func StatesAsGitHubItemMatcher(states []GitHubItemState) GitHubItemMatcher {
+	return GitHubItemMatcher{
+		Matcher: func(i *GitHubItem) bool {
+			for _, s := range states {
+				if i.State == s {
+					return true
+				}
+			}
+
+			return false
+		},
+		Name: fmt.Sprintf("states: %v", states),
+	}
+}
+
 // Matchinator is used to provide custom criteria for filtering GitHubItems that may not be built in to GitHub's
 // GraphQL API. It specifies a list of critieria which the GitHubItem MUST match in order to be selected. If any
 // of the criteria is not met, then the GitHubItem is not matched.
@@ -95,6 +113,10 @@ type Matchinator interface {
 
 	// HasRequiredLabels returns if a label is part of the match criteria.
 	HasRequiredLabels() bool
+
+	// WithStates adds the given states to the match criteria. An item in any one
+	// of them matches.
+	WithStates(states ...GitHubItemState) Matchinator
 
 	// Matches returns a boolean specifying if the GitHubItem matched the configured criteria. If no criteria is
 	// configured, then this function always returns true.
@@ -172,6 +194,16 @@ func (m *matchinator) WithRequiredLabels(labels ...string) Matchinator {
 
 func (m *matchinator) HasRequiredLabels() bool {
 	return m.hasRequiredLabels
+}
+
+func (m *matchinator) WithStates(states ...GitHubItemState) Matchinator {
+	if len(states) == 0 {
+		return m
+	}
+
+	m.matchFuncs = append(m.matchFuncs, StatesAsGitHubItemMatcher(states))
+
+	return m
 }
 
 func (m *matchinator) Matches(item *GitHubItem) (bool, string) {

@@ -1,18 +1,53 @@
 package pkg
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/shurcooL/githubv4"
 	"gotest.tools/v3/assert"
 )
 
+var (
+	issueOnly = []GitHubItemType{GitHubItemIssue}
+	prOnly    = []GitHubItemType{GitHubItemPullRequest}
+	bothTypes = []GitHubItemType{GitHubItemIssue, GitHubItemPullRequest}
+)
+
 func TestAsSearchQueryScopesToRepoAndIssues(t *testing.T) {
 	f := &GitHubSearchFilter{
 		Repositories: []GitHubRepository{{Owner: "learnitall", Name: "watchinator"}},
+		Types:        issueOnly,
 	}
 
 	assert.Equal(t, f.asSearchQuery(), "repo:learnitall/watchinator is:issue")
+}
+
+// search type ISSUE spans both kinds, so naming both types is the same as naming
+// neither and no type qualifier should be emitted.
+func TestAsSearchQueryOmitsTypeWhenBothWanted(t *testing.T) {
+	repos := []GitHubRepository{{Owner: "o", Name: "n"}}
+
+	both := &GitHubSearchFilter{Repositories: repos, Types: bothTypes}
+	assert.Equal(t, both.asSearchQuery(), "repo:o/n")
+
+	none := &GitHubSearchFilter{Repositories: repos}
+	assert.Equal(t, none.asSearchQuery(), "repo:o/n")
+}
+
+func TestAsSearchQueryScopesToPullRequests(t *testing.T) {
+	f := &GitHubSearchFilter{
+		Repositories: []GitHubRepository{{Owner: "o", Name: "n"}},
+		Types:        prOnly,
+	}
+
+	assert.Equal(t, f.asSearchQuery(), "repo:o/n is:pr")
 }
 
 // Repeated scope qualifiers are ORed by GitHub, including repo: mixed with org:,
@@ -29,12 +64,12 @@ func TestAsSearchQueryCombinesEveryScope(t *testing.T) {
 	assert.Equal(
 		t,
 		f.asSearchQuery(),
-		"repo:golang/go repo:learnitall/watchinator org:ngrok org:kubernetes is:issue",
+		"repo:golang/go repo:learnitall/watchinator org:ngrok org:kubernetes",
 	)
 }
 
 func TestAsSearchQueryScopesToOrgAlone(t *testing.T) {
-	f := &GitHubSearchFilter{Organizations: []string{"ngrok"}}
+	f := &GitHubSearchFilter{Organizations: []string{"ngrok"}, Types: issueOnly}
 
 	assert.Equal(t, f.asSearchQuery(), "org:ngrok is:issue")
 }
@@ -47,19 +82,31 @@ func TestAsSearchQueryOrsLabels(t *testing.T) {
 
 	// Comma-joined values inside one qualifier are ORed by GitHub; the label with
 	// a space has to be quoted or it would terminate the qualifier early.
-	assert.Equal(t, f.asSearchQuery(), `repo:o/n is:issue label:bug,"needs triage"`)
+	assert.Equal(t, f.asSearchQuery(), `repo:o/n label:bug,"needs triage"`)
 }
 
 func TestAsSearchQueryOnlyConstrainsASingleState(t *testing.T) {
 	repos := []GitHubRepository{{Owner: "o", Name: "n"}}
 
 	single := &GitHubSearchFilter{Repositories: repos, States: []string{"OPEN"}}
-	assert.Equal(t, single.asSearchQuery(), "repo:o/n is:issue state:open")
+	assert.Equal(t, single.asSearchQuery(), "repo:o/n state:open")
 
-	// Every state named is the same as no constraint, and two state qualifiers
-	// would AND into a contradiction.
+	// Two state qualifiers would AND into a contradiction, so the matcher takes
+	// over instead.
 	both := &GitHubSearchFilter{Repositories: repos, States: []string{"OPEN", "CLOSED"}}
-	assert.Equal(t, both.asSearchQuery(), "repo:o/n is:issue")
+	assert.Equal(t, both.asSearchQuery(), "repo:o/n")
+}
+
+// `state:merged` is not valid syntax: GitHub matches nothing rather than
+// erroring, so MERGED has to render through `is:`.
+func TestAsSearchQueryRendersMergedThroughIs(t *testing.T) {
+	f := &GitHubSearchFilter{
+		Repositories: []GitHubRepository{{Owner: "o", Name: "n"}},
+		Types:        prOnly,
+		States:       []string{"MERGED"},
+	}
+
+	assert.Equal(t, f.asSearchQuery(), "repo:o/n is:pr is:merged")
 }
 
 func TestIssueNodeAsGitHubItemMapsFields(t *testing.T) {
@@ -86,11 +133,87 @@ func TestIssueNodeAsGitHubItemMapsFields(t *testing.T) {
 	assert.Equal(t, item.Title, "a title")
 	// Body arrives inline now, rather than needing a follow-up query per item.
 	assert.Equal(t, item.Body, "a body")
+	assert.Equal(t, item.State, GitHubItemStateOpen)
 	assert.DeepEqual(t, item.Labels, []string{"bug", "wontfix"})
+}
+
+func TestPullRequestNodeAsGitHubItemCarriesMergedState(t *testing.T) {
+	n := &gitHubPullRequestNode{
+		Author:   GitHubActor{Login: "someone"},
+		ID:       githubv4.ID("pr1"),
+		Number:   9,
+		Title:    "a pr",
+		BodyText: "a pr body",
+		State:    githubv4.PullRequestStateMerged,
+	}
+	n.Repository.Name = "watchinator"
+	n.Repository.Owner.Login = "learnitall"
+
+	item := n.asGitHubItem()
+	assert.Assert(t, item != nil)
+	assert.Equal(t, item.Type, GitHubItemPullRequest)
+	assert.Equal(t, item.Number, int32(9))
+	// MERGED has no equivalent in githubv4.IssueState, which is why items carry
+	// their own state type.
+	assert.Equal(t, item.State, GitHubItemStateMerged)
+}
+
+// Only one inline fragment decodes per node; the other stays zero.
+func TestSearchNodePicksWhicheverFragmentDecoded(t *testing.T) {
+	issueNode := &gitHubSearchNode{}
+	issueNode.Issue.ID = githubv4.ID("i1")
+	assert.Equal(t, issueNode.asGitHubItem().Type, GitHubItemIssue)
+
+	prNode := &gitHubSearchNode{}
+	prNode.PullRequest.ID = githubv4.ID("p1")
+	assert.Equal(t, prNode.asGitHubItem().Type, GitHubItemPullRequest)
+
+	assert.Assert(t, (&gitHubSearchNode{}).asGitHubItem() == nil)
 }
 
 // An inline fragment that does not match the node's concrete type decodes to a
 // zero value, which must not be mistaken for a real result.
 func TestIssueNodeAsGitHubItemRejectsZeroNode(t *testing.T) {
 	assert.Assert(t, (&gitHubIssueNode{}).asGitHubItem() == nil)
+}
+
+// The search document is assembled by githubv4 from the struct, so a dropped
+// fragment would not fail to compile: PR results would just silently stop
+// arriving. Assert both fragments and the variable types reach the wire.
+func TestSearchQueryRequestsBothFragments(t *testing.T) {
+	var body []byte
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ = io.ReadAll(r.Body)
+
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"search":{"issueCount":0,`+
+			`"pageInfo":{"endCursor":"","hasNextPage":false},"nodes":[]}}}`)
+	}))
+	defer srv.Close()
+
+	vars := &gitHubSearchQueryVars{
+		Q:            githubv4.String("repo:o/n"),
+		Type:         githubv4.SearchTypeIssue,
+		SearchCursor: (*githubv4.String)(nil),
+		N:            100,
+	}
+
+	query := &gitHubSearchQuery{}
+	err := githubv4.NewEnterpriseClient(srv.URL, srv.Client()).
+		Query(context.Background(), &query, vars.AsMap())
+	assert.NilError(t, err)
+
+	var parsed struct {
+		Query string `json:"query"`
+	}
+	assert.NilError(t, json.Unmarshal(body, &parsed))
+
+	assert.Assert(t, strings.Contains(parsed.Query, "... on Issue{"), parsed.Query)
+	assert.Assert(t, strings.Contains(parsed.Query, "... on PullRequest{"), parsed.Query)
+	assert.Assert(t, strings.Contains(parsed.Query, "$searchType:SearchType!"), parsed.Query)
+	// Labels and body come inline; a regression to per-item queries would show up
+	// as these disappearing from the document.
+	assert.Assert(t, strings.Contains(parsed.Query, "labels(first: 100)"), parsed.Query)
+	assert.Assert(t, strings.Contains(parsed.Query, "bodyText"), parsed.Query)
 }

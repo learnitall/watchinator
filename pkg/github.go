@@ -18,8 +18,9 @@ import (
 type GitHubItemType string
 
 const (
-	GitHubItemIssue      GitHubItemType = "issue"
-	gitHubNotFoundErrStr string         = "Could not resolve to a"
+	GitHubItemIssue       GitHubItemType = "issue"
+	GitHubItemPullRequest GitHubItemType = "pullRequest"
+	gitHubNotFoundErrStr  string         = "Could not resolve to a"
 )
 
 // GitHubNotFoundError is raised when a GitHubinator cannot find the given item. It is a special error that can be
@@ -61,54 +62,35 @@ type GitHubLabel struct {
 	Name string `json:"name"`
 }
 
-// GitHubIssue represents an issue on GitHub.
-// It is associated with the following GraphQL object:
-// https://docs.github.com/en/graphql/reference/objects#issue.
-type GitHubIssue struct {
-	Author       GitHubActor                `json:"author"`
-	Body         string                     `json:"body"`
-	Labels       []string                   `json:"labels"`
-	Number       int32                      `json:"number"`
-	State        githubv4.IssueState        `json:"state"`
-	Subscription githubv4.SubscriptionState `json:"Subscription"`
-	Title        string                     `json:"title"`
-	UpdatedAt    time.Time                  `json:"updatedAt"`
-}
+// GitHubItemState is the state of an item. Issues are OPEN or CLOSED; pull
+// requests add MERGED, so this cannot be githubv4.IssueState.
+type GitHubItemState string
 
-func (i GitHubIssue) LogValue() slog.Value {
-	return slog.GroupValue(
-		slog.Any("author", i.Author.LogValue()),
-		slog.String("body", i.Body),
-		slog.Int("number", int(i.Number)),
-		slog.String("state", string(i.State)),
-		slog.String("subscription", string(i.Subscription)),
-		slog.String("title", i.Title),
-		slog.Time("updatedAt", i.UpdatedAt),
-	)
-}
+const (
+	GitHubItemStateOpen   GitHubItemState = "OPEN"
+	GitHubItemStateClosed GitHubItemState = "CLOSED"
+	GitHubItemStateMerged GitHubItemState = "MERGED"
+)
 
-// NewTestGitHubIssue creates a new GitHubIssue struct with pre-populated fields. It can be used in unit tests.
-func NewTestGitHubIssue() *GitHubIssue {
-	return &GitHubIssue{
-		Author: GitHubActor{
-			Login: "actor",
-		},
-		Body:         "issue body",
-		Labels:       []string{"a/test/label", "another/label"},
-		Number:       1,
-		State:        "OPEN",
-		Subscription: "UNSUBSCRIBED",
-		Title:        "a test issue",
-		UpdatedAt:    time.Now(),
+// asSearchTerm renders the state as a search qualifier. MERGED is not a value
+// `state:` accepts: `state:merged` matches nothing rather than erroring, so it
+// has to go through `is:`.
+func (s GitHubItemState) asSearchTerm() string {
+	if s == GitHubItemStateMerged {
+		return "is:merged"
 	}
+
+	return "state:" + strings.ToLower(string(s))
 }
 
 // GitHubSearchFilter describes what GitHub should return before any client-side
-// matching runs: which repositories or organizations to look in, and how to
-// narrow within them. It is rendered into a GitHub search query string.
+// matching runs: which repositories or organizations to look in, which item
+// types to consider, and how to narrow within them. It is rendered into a GitHub
+// search query string.
 type GitHubSearchFilter struct {
 	Repositories  []GitHubRepository
 	Organizations []string
+	Types         []GitHubItemType
 	Labels        []string
 	States        []string
 }
@@ -130,6 +112,9 @@ func quoteSearchTerm(s string) string {
 // Values comma-joined inside a single qualifier are likewise ORed, which is the
 // semantic SearchLabels documents ("at least one of these labels"). Note that
 // the repository.issues connection this replaced ANDed them instead.
+//
+// Anything this cannot express server-side is left to the Matchinator, which is
+// why states beyond a single value are not rendered here.
 func (f *GitHubSearchFilter) asSearchQuery() string {
 	terms := []string{}
 
@@ -141,8 +126,16 @@ func (f *GitHubSearchFilter) asSearchQuery() string {
 		terms = append(terms, "org:"+quoteSearchTerm(o))
 	}
 
-	// search type ISSUE covers pull requests too; this keeps it to issues.
-	terms = append(terms, "is:issue")
+	// search type ISSUE spans both kinds, so a lone type is a real narrowing and
+	// naming both is the same as saying nothing.
+	if len(f.Types) == 1 {
+		switch f.Types[0] {
+		case GitHubItemIssue:
+			terms = append(terms, "is:issue")
+		case GitHubItemPullRequest:
+			terms = append(terms, "is:pr")
+		}
+	}
 
 	if len(f.Labels) > 0 {
 		quoted := make([]string, 0, len(f.Labels))
@@ -153,51 +146,64 @@ func (f *GitHubSearchFilter) asSearchQuery() string {
 		terms = append(terms, "label:"+strings.Join(quoted, ","))
 	}
 
-	// Repeated state qualifiers AND into a contradiction, and naming every state
-	// is the same as not filtering, so only a lone state narrows anything.
+	// Repeated state qualifiers AND into a contradiction, so only a lone state
+	// narrows the query; the matcher enforces the rest.
 	if len(f.States) == 1 {
-		terms = append(terms, "state:"+strings.ToLower(f.States[0]))
+		terms = append(terms, GitHubItemState(f.States[0]).asSearchTerm())
 	}
 
 	return strings.Join(terms, " ")
 }
 
-// GitHubItem is a container sturct holding different items that can be queried on GitHub. It is used to provide
-// a common format for label selectors.
+// GitHubItem is an issue or a pull request. It provides a common format for
+// label selectors.
 type GitHubItem struct {
-	GitHubIssue
-	Type GitHubItemType   `json:"type"`
-	Repo GitHubRepository `json:"repo"`
-	ID   githubv4.ID      `json:"id"`
+	Type         GitHubItemType             `json:"type"`
+	Repo         GitHubRepository           `json:"repo"`
+	ID           githubv4.ID                `json:"id"`
+	Author       GitHubActor                `json:"author"`
+	Body         string                     `json:"body"`
+	Labels       []string                   `json:"labels"`
+	Number       int32                      `json:"number"`
+	State        GitHubItemState            `json:"state"`
+	Subscription githubv4.SubscriptionState `json:"Subscription"`
+	Title        string                     `json:"title"`
+	UpdatedAt    time.Time                  `json:"updatedAt"`
 }
 
 // NewTestGitHubItem creates a new instance of a GitHubItem with pre-populated fields. It can be used in unit tests.
 func NewTestGitHubItem() *GitHubItem {
 	return &GitHubItem{
-		Type: "issue",
+		Type: GitHubItemIssue,
 		Repo: GitHubRepository{
 			Owner: "owner",
 			Name:  "repo",
 		},
-		GitHubIssue: *NewTestGitHubIssue(),
+		Author: GitHubActor{
+			Login: "actor",
+		},
+		Body:         "issue body",
+		Labels:       []string{"a/test/label", "another/label"},
+		Number:       1,
+		State:        GitHubItemStateOpen,
+		Subscription: "UNSUBSCRIBED",
+		Title:        "a test issue",
+		UpdatedAt:    time.Now(),
 	}
 }
 
 func (i GitHubItem) LogValue() slog.Value {
-	var embeddedAttr slog.Attr
-
-	switch i.Type {
-	case GitHubItemIssue:
-		embeddedAttr = slog.Any("issue", i.GitHubIssue.LogValue())
-	default:
-		embeddedAttr = slog.String("embedded", "<none>")
-	}
-
 	return slog.GroupValue(
-		embeddedAttr,
 		slog.String("type", string(i.Type)),
 		slog.Any("repo", i.Repo.LogValue()),
 		slog.Any("id", i.ID),
+		slog.Any("author", i.Author.LogValue()),
+		slog.String("body", i.Body),
+		slog.Int("number", int(i.Number)),
+		slog.String("state", string(i.State)),
+		slog.String("subscription", string(i.Subscription)),
+		slog.String("title", i.Title),
+		slog.Time("updatedAt", i.UpdatedAt),
 	)
 }
 
@@ -310,6 +316,40 @@ func (v *gitHubOrganizationQueryVars) AsMap() map[string]any {
 // of how many items actually matched.
 const searchResultLimit = 1000
 
+// searchNodeLabels is the inline label set shared by both fragments. It is not
+// paginated, so an item carrying more than this loses the tail and
+// requiredLabels could miss. No repository we watch is close.
+type searchNodeLabels struct {
+	Nodes []struct {
+		Name githubv4.String
+	}
+}
+
+func (l searchNodeLabels) names() []string {
+	names := make([]string, 0, len(l.Nodes))
+	for _, n := range l.Nodes {
+		names = append(names, string(n.Name))
+	}
+
+	return names
+}
+
+// searchNodeRepository is the repository each fragment reports itself under. It
+// comes off the node rather than the caller so one search can span scopes.
+type searchNodeRepository struct {
+	Name  githubv4.String
+	Owner struct {
+		Login githubv4.String
+	}
+}
+
+func (r searchNodeRepository) asGitHubRepository() GitHubRepository {
+	return GitHubRepository{
+		Owner: string(r.Owner.Login),
+		Name:  string(r.Name),
+	}
+}
+
 // gitHubIssueNode is the `... on Issue` fragment of a search result. Search
 // returns the body and labels inline, so unlike the repository.issues connection
 // this replaces, listing costs one request per page instead of one per page plus
@@ -323,19 +363,8 @@ type gitHubIssueNode struct {
 	State              githubv4.IssueState
 	UpdatedAt          githubv4.DateTime
 	ViewerSubscription githubv4.SubscriptionState
-	// Inline labels are not paginated, so an item carrying more than this loses
-	// the tail and requiredLabels could miss. No repository we watch is close.
-	Labels struct {
-		Nodes []struct {
-			Name githubv4.String
-		}
-	} `graphql:"labels(first: 100)"`
-	Repository struct {
-		Name  githubv4.String
-		Owner struct {
-			Login githubv4.String
-		}
-	}
+	Labels             searchNodeLabels `graphql:"labels(first: 100)"`
+	Repository         searchNodeRepository
 }
 
 // asGitHubItem converts the node into a GitHubItem. It returns nil for a zero
@@ -345,29 +374,71 @@ func (n *gitHubIssueNode) asGitHubItem() *GitHubItem {
 		return nil
 	}
 
-	labels := make([]string, 0, len(n.Labels.Nodes))
-	for _, l := range n.Labels.Nodes {
-		labels = append(labels, string(l.Name))
+	return &GitHubItem{
+		Type:         GitHubItemIssue,
+		Repo:         n.Repository.asGitHubRepository(),
+		ID:           n.ID,
+		Author:       n.Author,
+		Body:         string(n.BodyText),
+		Labels:       n.Labels.names(),
+		Number:       int32(n.Number),
+		State:        GitHubItemState(n.State),
+		Subscription: n.ViewerSubscription,
+		Title:        string(n.Title),
+		UpdatedAt:    n.UpdatedAt.Time,
+	}
+}
+
+// gitHubPullRequestNode is the `... on PullRequest` fragment of a search result.
+// It mirrors gitHubIssueNode except for the state enum, which adds MERGED.
+type gitHubPullRequestNode struct {
+	Author             GitHubActor
+	ID                 githubv4.ID
+	Number             githubv4.Int
+	Title              githubv4.String
+	BodyText           githubv4.String
+	State              githubv4.PullRequestState
+	UpdatedAt          githubv4.DateTime
+	ViewerSubscription githubv4.SubscriptionState
+	Labels             searchNodeLabels `graphql:"labels(first: 100)"`
+	Repository         searchNodeRepository
+}
+
+func (n *gitHubPullRequestNode) asGitHubItem() *GitHubItem {
+	if n.ID == nil || n.ID == "" {
+		return nil
 	}
 
 	return &GitHubItem{
-		Type: GitHubItemIssue,
-		Repo: GitHubRepository{
-			Owner: string(n.Repository.Owner.Login),
-			Name:  string(n.Repository.Name),
-		},
-		ID: n.ID,
-		GitHubIssue: GitHubIssue{
-			Author:       n.Author,
-			Body:         string(n.BodyText),
-			Labels:       labels,
-			Number:       int32(n.Number),
-			State:        n.State,
-			Subscription: n.ViewerSubscription,
-			Title:        string(n.Title),
-			UpdatedAt:    n.UpdatedAt.Time,
-		},
+		Type:         GitHubItemPullRequest,
+		Repo:         n.Repository.asGitHubRepository(),
+		ID:           n.ID,
+		Author:       n.Author,
+		Body:         string(n.BodyText),
+		Labels:       n.Labels.names(),
+		Number:       int32(n.Number),
+		State:        GitHubItemState(n.State),
+		Subscription: n.ViewerSubscription,
+		Title:        string(n.Title),
+		UpdatedAt:    n.UpdatedAt.Time,
 	}
+}
+
+// gitHubSearchNode is one result of a search. type ISSUE spans issues and pull
+// requests, so both fragments are always requested and the query string decides
+// which of them decodes.
+type gitHubSearchNode struct {
+	Issue       gitHubIssueNode       `graphql:"... on Issue"`
+	PullRequest gitHubPullRequestNode `graphql:"... on PullRequest"`
+}
+
+// asGitHubItem picks whichever fragment actually decoded for this node.
+func (n *gitHubSearchNode) asGitHubItem() *GitHubItem {
+	if item := n.Issue.asGitHubItem(); item != nil {
+		return item
+	}
+
+	return n.PullRequest.asGitHubItem()
 }
 
 // gitHubSearchQuery queries GitHub's search connection for items matching a
@@ -379,9 +450,7 @@ type gitHubSearchQuery struct {
 			EndCursor   githubv4.String
 			HasNextPage githubv4.Boolean
 		}
-		Nodes []struct {
-			Issue gitHubIssueNode `graphql:"... on Issue"`
-		}
+		Nodes []gitHubSearchNode
 	} `graphql:"search(query: $q, type: $searchType, first: $n, after: $searchCursor)"`
 }
 
@@ -726,7 +795,7 @@ func (gh *gitHubinator) ListIssues(
 			}
 
 			for i := range query.Search.Nodes {
-				item := query.Search.Nodes[i].Issue.asGitHubItem()
+				item := query.Search.Nodes[i].asGitHubItem()
 				if item == nil {
 					continue
 				}
