@@ -66,21 +66,62 @@ cat result | docker load
 
 ## Overview
 
-Watchinator was created to handle subscribing to select issues on massive repositories with a lot of collaborators.
-GitHub only has support for automatically subscribing to all issues on a repository, which can create notification fatigue and
-generate noise in an inbox.
+Watchinator was created to handle subscribing to select issues and pull requests on massive repositories with a lot of
+collaborators. GitHub only has support for automatically subscribing to everything on a repository, which can create
+notification fatigue and generate noise in an inbox.
 
-Watchinator will continually poll GitHub for new issues and filter them based on pre-configured criteria. If an issue matches
-the pre-configured criteria, then watchinator will perform pre-configured actions, such as subscribing the user to the issue or
-sending an email to the user containing the issue.
+Watchinator will continually poll GitHub for new items and filter them based on pre-configured criteria. If an item matches
+the pre-configured criteria, then watchinator will perform pre-configured actions, such as subscribing the user to the item or
+sending an email to the user containing the item.
 
 ## Configuration
 
 Watchinator is configured using a yaml-configurtion file. Documentation is provided in the associated go-struct. When watchinator
 starts up, validation is performed on the configuration to ensure things are set correctly.
 
-Each config file is composed of multiple 'Watches'. A 'Watch' describes a set of match criteria which will be applied to
-the watch's configured repositories, and a set of actions which will be performed on a match.
+Each config file is composed of multiple 'Watches'. A 'Watch' describes a scope to look in, a set of match criteria applied
+within it, and a set of actions performed on a match.
+
+### Scope
+
+A watch needs at least one of `repos` or `orgs`. They are ORed, so a watch can name individual repositories, whole
+organizations, or a mix:
+
+```yaml
+watches:
+  - name: "everything I care about"
+    repos:
+      - owner: "learnitall"
+        name: "watchinator"
+    orgs:
+      - "ngrok"
+```
+
+`orgs` covers every repository the organization owns that your PAT can see, which avoids enumerating them by hand.
+
+### Item types
+
+`types` selects what a watch looks at: `issue`, `pullRequest`, or both. Omitting it means both.
+
+```yaml
+    types:
+      - issue
+      - pullRequest
+```
+
+### How queries reach GitHub
+
+Watches are compiled into a single [GitHub search](https://docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests)
+query per poll, covering every repository and organization in the watch at once. Two consequences are worth knowing:
+
+- **Search paginates to at most 1000 results**, however many matched. A watch broad enough to exceed that logs a warning
+  naming the count; narrow it with more criteria rather than trusting the tail.
+- **Search is rate-limited separately** from the rest of the GraphQL API, and its index lags the API slightly, so a brand
+  new item can take a moment to show up.
+
+Criteria that search cannot express are applied locally after the results come back. Note that all criteria are ANDed: two
+`titleRegex` entries mean the title must match *both*. Use one regex with alternation for an OR, and separate watches to
+match a term in either the title or the body.
 
 ### Example
 
@@ -139,8 +180,8 @@ watches:
 ```
 
 Watchinator uses the [shurcooL/githubv4](https://github.com/shurcooL/githubv4) library in the background to perform
-queries against GitHub's GraphQL API. As such, the valid options for the state field can be found
-[here](https://docs.github.com/en/graphql/reference/enums#issuestate).
+queries against GitHub's GraphQL API. Valid states are `OPEN`, `CLOSED`, and `MERGED`. `MERGED` only ever applies to a
+pull request, so a watch limited to `types: [issue]` is rejected for asking for it.
 
 Now that we have a watch with at least one filter, we can use watchinator's 'list' subcommand to test it out:
 
