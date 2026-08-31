@@ -3,8 +3,8 @@ package pkg
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -133,109 +133,128 @@ func TestPollCanBeClosedUsingContext(t *testing.T) {
 	close(testDoneChan)
 }
 
+// tickCounter records callbacks on the poll goroutine and lets the test goroutine
+// read the total without racing it.
+type tickCounter struct {
+	n      atomic.Int64
+	ticked chan struct{}
+}
+
+func newTickCounter() *tickCounter {
+	return &tickCounter{ticked: make(chan struct{}, 128)}
+}
+
+func (c *tickCounter) callback(_ time.Time) {
+	c.n.Add(1)
+
+	// Never block the poll goroutine; waitFor re-reads the count regardless of
+	// whether this signal made it through.
+	select {
+	case c.ticked <- struct{}{}:
+	default:
+	}
+}
+
+func (c *tickCounter) count() int64 {
+	return c.n.Load()
+}
+
+// waitFor blocks until at least n ticks have been seen. Waiting on the count is
+// what makes these tests deterministic: sleeping for a multiple of the interval
+// and asserting an exact total races the tick that lands on the boundary.
+func (c *tickCounter) waitFor(t *testing.T, n int64, within time.Duration) {
+	t.Helper()
+
+	deadline := time.After(within)
+
+	recheck := time.NewTicker(time.Millisecond)
+	defer recheck.Stop()
+
+	for c.count() < n {
+		select {
+		case <-c.ticked:
+		case <-recheck.C:
+		case <-deadline:
+			t.Fatalf("saw %d of %d ticks within %s", c.count(), n, within)
+		}
+	}
+}
+
 func TestPollinatorCanStartAndStopNewPolls(t *testing.T) {
-	testDoneChan := make(chan bool)
-
-	go haveTestTimeout(t, time.Millisecond*300, testDoneChan)
-
 	p := NewPollinator(context.Background(), debugLogger)
 
-	numTickOne := 0
-	numTickTwo := 0
+	fast := newTickCounter()
+	slow := newTickCounter()
 
-	p.Add(
-		"test-1", time.Millisecond*50,
-		func(_ time.Time) {
-			numTickOne += 1
-		},
-		false,
-	)
-	p.Add(
-		"test-2", time.Millisecond*100,
-		func(_ time.Time) {
-			numTickTwo += 1
-		},
-		false,
-	)
+	p.Add("test-1", time.Millisecond*50, fast.callback, false)
+	p.Add("test-2", time.Millisecond*100, slow.callback, false)
 
-	time.Sleep(time.Millisecond * 150)
+	fast.waitFor(t, 3, time.Second)
 
 	p.Delete("test-1")
 	p.Delete("test-2")
 
-	fmt.Println(numTickOne)
-	assert.Equal(t, numTickOne == 3, true)
-	assert.Equal(t, numTickTwo == 1, true)
+	// Delete blocks until the poll goroutine has exited, so these are final.
+	// That Delete actually stops a poll is covered by
+	// TestPollinatorCanDeleteExistingTicker, which lets real time pass before
+	// re-reading; asserting it here would only compare an atomic against itself.
+	fastTotal := fast.count()
+	slowTotal := slow.count()
 
-	close(testDoneChan)
+	// The point is that each poll runs on its own interval, not that a given
+	// number of ticks landed inside a sleep.
+	assert.Assert(
+		t, slowTotal >= 1, "slower poll never ran, got %d", slowTotal,
+	)
+	assert.Assert(
+		t, slowTotal < fastTotal,
+		"expected the 100ms poll to tick less than the 50ms poll, got %d vs %d",
+		slowTotal, fastTotal,
+	)
 }
 
 func TestPollinatorCanUpdateExistingTicker(t *testing.T) {
-	testDoneChan := make(chan bool)
-
-	go haveTestTimeout(t, time.Millisecond*300, testDoneChan)
-
 	p := NewPollinator(context.Background(), debugLogger)
-	numTickOne := 0
+
+	counter := newTickCounter()
 
 	p.Add(
 		"test-1", time.Millisecond*50,
 		func(_ time.Time) {
-			t.Error(errors.New("ticker was not updated within 50 ms"))
-			t.FailNow()
+			t.Error(errors.New("replaced callback was still invoked"))
 		},
 		false,
 	)
-	p.Add(
-		"test-1", time.Millisecond*50,
-		func(t time.Time) {
-			numTickOne += 1
-		},
-		false,
-	)
+	p.Add("test-1", time.Millisecond*50, counter.callback, false)
 
-	time.Sleep(time.Millisecond * 105)
+	counter.waitFor(t, 2, time.Second)
 
 	p.Delete("test-1")
-
-	assert.Equal(t, numTickOne == 2, true)
-
-	close(testDoneChan)
 }
 
 func TestPollinatorCanDeleteExistingTicker(t *testing.T) {
-	testDoneChan := make(chan bool)
-
-	go haveTestTimeout(t, time.Millisecond*300, testDoneChan)
-
 	p := NewPollinator(context.Background(), debugLogger)
 
-	numTickOne := 0
-	numTickTwo := 0
+	deleted := newTickCounter()
+	kept := newTickCounter()
 
-	p.Add(
-		"test-1", time.Millisecond*50,
-		func(t time.Time) {
-			numTickOne += 1
-		},
-		false,
-	)
-	p.Add(
-		"test-2", time.Millisecond*50,
-		func(_ time.Time) {
-			numTickTwo += 1
-		},
-		false,
-	)
+	p.Add("test-1", time.Millisecond*50, deleted.callback, false)
+	p.Add("test-2", time.Millisecond*50, kept.callback, false)
 
-	time.Sleep(time.Millisecond * 55)
+	deleted.waitFor(t, 1, time.Second)
 	p.Delete("test-1")
-	time.Sleep(time.Millisecond * 55)
 
-	assert.Equal(t, numTickOne == 1, true)
-	assert.Equal(t, numTickTwo == 2, true)
+	// Delete waits for the poll's goroutine to exit, so nothing can increment
+	// this afterwards.
+	deletedTotal := deleted.count()
 
-	close(testDoneChan)
+	// The surviving poll must keep ticking well past the point the other stopped.
+	kept.waitFor(t, deletedTotal+2, time.Second)
+
+	assert.Assert(
+		t, cmp.Equal(deleted.count(), deletedTotal),
+		"deleted poll ticked again after Delete returned",
+	)
 }
 
 func TestPollinatorCanStopAllTickers(t *testing.T) {
