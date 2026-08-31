@@ -65,17 +65,6 @@ func TestRegexMatchersAreCaseSensitive(t *testing.T) {
 	assert.Equal(t, match(TitleRegexAsGitHubItemMatcher(regexp.MustCompile("(?i)^this is"))), true)
 }
 
-func TestRequiredLabelAsGitHubItemMatcherCreatesWorkingMatcher(t *testing.T) {
-	item := NewTestGitHubItem()
-	item.Labels = []string{"a cool label"}
-
-	matcher := RequiredLabelAsGitHubItemMatcher("a cool label")
-	assert.Equal(t, matcher.Matcher(item), true)
-
-	item.Labels = []string{}
-	assert.Equal(t, matcher.Matcher(item), false)
-}
-
 func TestEmptyMatchinatorAlwaysMatches(t *testing.T) {
 	item := NewTestGitHubItem()
 	matchinator := NewMatchinator()

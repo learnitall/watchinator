@@ -80,11 +80,12 @@ func (s GitHubItemState) asSearchTerm() string {
 // types to consider, and how to narrow within them. It is rendered into a GitHub
 // search query string.
 type GitHubSearchFilter struct {
-	Repositories  []GitHubRepository
-	Organizations []string
-	Types         []GitHubItemType
-	Labels        []string
-	States        []string
+	Repositories   []GitHubRepository
+	Organizations  []string
+	Types          []GitHubItemType
+	AnyLabels      []string
+	RequiredLabels []string
+	States         []string
 }
 
 // quoteSearchTerm wraps a value in quotes when it holds characters that would
@@ -101,9 +102,10 @@ func quoteSearchTerm(s string) string {
 //
 // Repeated scope qualifiers are ORed by GitHub, including when repo: and org:
 // are mixed, so every scope belongs in one query rather than one query each.
-// Values comma-joined inside a single qualifier are likewise ORed, which is the
-// semantic SearchLabels documents ("at least one of these labels"). Note that
-// the repository.issues connection this replaced ANDed them instead.
+//
+// Labels use both forms deliberately: values comma-joined inside one label:
+// qualifier are ORed, and repeated label: qualifiers are ANDed. So AnyLabels
+// becomes one qualifier and each RequiredLabels entry becomes its own.
 //
 // Anything this cannot express server-side is left to the Matchinator, which is
 // why states beyond a single value are not rendered here.
@@ -129,13 +131,17 @@ func (f *GitHubSearchFilter) asSearchQuery() string {
 		}
 	}
 
-	if len(f.Labels) > 0 {
-		quoted := make([]string, 0, len(f.Labels))
-		for _, l := range f.Labels {
+	if len(f.AnyLabels) > 0 {
+		quoted := make([]string, 0, len(f.AnyLabels))
+		for _, l := range f.AnyLabels {
 			quoted = append(quoted, quoteSearchTerm(l))
 		}
 
 		terms = append(terms, "label:"+strings.Join(quoted, ","))
+	}
+
+	for _, l := range f.RequiredLabels {
+		terms = append(terms, "label:"+quoteSearchTerm(l))
 	}
 
 	// Repeated state qualifiers AND into a contradiction, so only a lone state
@@ -317,8 +323,9 @@ func (v *gitHubOrganizationQueryVars) AsMap() map[string]any {
 const searchResultLimit = 1000
 
 // searchNodeLabels is the inline label set shared by both fragments. It is not
-// paginated, so an item carrying more than this loses the tail and
-// requiredLabels could miss. No repository we watch is close.
+// paginated, so an item carrying more than this loses the tail. Filtering does
+// not depend on it (GitHub applies requiredLabels), but selectors and reported
+// labels do.
 type searchNodeLabels struct {
 	Nodes []struct {
 		Name githubv4.String

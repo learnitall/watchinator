@@ -78,7 +78,7 @@ func TestAsSearchQueryScopesToOrgAlone(t *testing.T) {
 func TestAsSearchQueryOrsLabels(t *testing.T) {
 	f := &GitHubSearchFilter{
 		Repositories: []GitHubRepository{{Owner: "o", Name: "n"}},
-		Labels:       []string{"bug", "needs triage"},
+		AnyLabels:    []string{"bug", "needs triage"},
 	}
 
 	// Comma-joined values inside one qualifier are ORed by GitHub; the label with
@@ -243,6 +243,31 @@ func TestSearchQueryRequestsBothFragments(t *testing.T) {
 	// as these disappearing from the document.
 	assert.Assert(t, strings.Contains(parsed.Query, "labels(first: 100)"), parsed.Query)
 	assert.Assert(t, strings.Contains(parsed.Query, "bodyText"), parsed.Query)
+}
+
+// Repeated label: qualifiers are ANDed by GitHub while comma-joined values in one
+// qualifier are ORed, so requiredLabels and searchLabels render differently and
+// compose as (any of these) AND (each of those).
+func TestAsSearchQueryAndsRequiredLabels(t *testing.T) {
+	f := &GitHubSearchFilter{
+		Repositories:   []GitHubRepository{{Owner: "o", Name: "n"}},
+		RequiredLabels: []string{"kind/bug", "sig/node"},
+	}
+
+	assert.Equal(t, f.asSearchQuery(), "repo:o/n label:kind/bug label:sig/node")
+}
+
+func TestAsSearchQueryCombinesAnyAndRequiredLabels(t *testing.T) {
+	f := &GitHubSearchFilter{
+		Repositories:   []GitHubRepository{{Owner: "o", Name: "n"}},
+		AnyLabels:      []string{"bug", "regression"},
+		RequiredLabels: []string{"needs triage"},
+	}
+
+	assert.Equal(
+		t, f.asSearchQuery(),
+		`repo:o/n label:bug,regression label:"needs triage"`,
+	)
 }
 
 // checkOrgAgainst stands up a GraphQL server returning the given repositoryOwner

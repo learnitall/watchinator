@@ -212,11 +212,13 @@ type Watch struct {
 	// https://pkg.go.dev/k8s.io/apimachinery@v0.27.1/pkg/labels#Parse for the syntax.
 	Selectors []string          `yaml:"selectors"`
 	selectors []labels.Selector `yaml:"-"`
-	// RequiredLabels are a list of labels that must be present for an item to be watched. An item must have all of
-	// these labels to be watched.
+	// RequiredLabels are labels that must all be present for an item to be watched.
+	// Enforced by GitHub as repeated label: qualifiers, so matching is
+	// case-insensitive.
 	RequiredLabels []string `yaml:"requiredLabels"`
-	// SearchLabels are a set of labels that will be used to find new items. They will not be used as criteria for if
-	// an item is watched, but if an item is discovered from GitHub.
+	// SearchLabels narrow which items GitHub returns to those carrying at least one
+	// of them. Unlike RequiredLabels they widen rather than restrict: they decide
+	// what is discovered, not what qualifies.
 	SearchLabels []string `yaml:"searchLabels"`
 	// BodyRegex is a list of regex expressions which must match the item's body.
 	BodyRegex []string         `yaml:"bodyRegex"`
@@ -362,20 +364,25 @@ func (w *Watch) GetTypes() []GitHubItemType {
 }
 
 // GetSearchFilter returns a GitHubSearchFilter based on the Watch's scope, Types,
-// SearchLabels and States. It can be passed to a GitHubinator for listing items
-// that match the Watch.
+// SearchLabels, RequiredLabels and States. It can be passed to a GitHubinator for
+// listing items that match the Watch.
 func (w *Watch) GetSearchFilter() *GitHubSearchFilter {
 	return &GitHubSearchFilter{
-		Repositories:  w.Repositories,
-		Organizations: w.Organizations,
-		Types:         w.GetTypes(),
-		Labels:        w.SearchLabels,
-		States:        w.States,
+		Repositories:   w.Repositories,
+		Organizations:  w.Organizations,
+		Types:          w.GetTypes(),
+		AnyLabels:      w.SearchLabels,
+		RequiredLabels: w.RequiredLabels,
+		States:         w.States,
 	}
 }
 
-// GetMatchinator returns a Matchinator based on the Watch's specified BodyRegex, Selectors, RequiredLabels and
-// States fields. It can be passed to a GitHubinator for listing items that match the Watch.
+// GetMatchinator returns a Matchinator based on the Watch's specified BodyRegex, Selectors and States fields. It can
+// be passed to a GitHubinator for listing items that match the Watch.
+//
+// RequiredLabels is deliberately absent: repeated label: qualifiers are ANDed by
+// GitHub, so the search query enforces it and re-checking here would only add a
+// way to wrongly reject an item whose label list was truncated at 100.
 func (w *Watch) GetMatchinator() Matchinator {
 	states := make([]GitHubItemState, 0, len(w.States))
 	for _, s := range w.States {
@@ -388,7 +395,6 @@ func (w *Watch) GetMatchinator() Matchinator {
 		WithBodyRegexes(w.bodyRegex...).
 		WithTitleRegexes(w.titleRegex...).
 		WithSelectors(w.selectors...).
-		WithRequiredLabels(w.RequiredLabels...).
 		WithStates(states...)
 }
 

@@ -53,23 +53,6 @@ func TitleRegexAsGitHubItemMatcher(titleRegex *regexp.Regexp) GitHubItemMatcher 
 	}
 }
 
-// RequiredLabelAsGitHubItemMatcher creates a new GitHubItemMatcher from the givne requiredLabel. If the given
-// requiredLabel is present in the GitHubItem's labels, then the matcher returns true.
-func RequiredLabelAsGitHubItemMatcher(requiredLabel string) GitHubItemMatcher {
-	return GitHubItemMatcher{
-		Matcher: func(i *GitHubItem) bool {
-			for _, itemLabel := range i.Labels {
-				if itemLabel == requiredLabel {
-					return true
-				}
-			}
-
-			return false
-		},
-		Name: fmt.Sprintf("requiredLabel: '%s'", requiredLabel),
-	}
-}
-
 // StatesAsGitHubItemMatcher creates a GitHubItemMatcher that accepts an item in
 // any one of the given states. Unlike the other criteria this ORs internally,
 // because a set of states is a single choice rather than several requirements.
@@ -104,9 +87,6 @@ type Matchinator interface {
 
 	// WithTitleRegexes adds the given titleRegexes to the match critieria.
 	WithTitleRegexes(titleRegexes ...*regexp.Regexp) Matchinator
-
-	// WithRequiredLabels adds the given labels to the match criteria.
-	WithRequiredLabels(labels ...string) Matchinator
 
 	// WithStates adds the given states to the match criteria. An item in any one
 	// of them matches.
@@ -159,18 +139,6 @@ func (m *matchinator) WithTitleRegexes(titleRegexes ...*regexp.Regexp) Matchinat
 
 	for _, r := range titleRegexes {
 		m.matchFuncs = append(m.matchFuncs, TitleRegexAsGitHubItemMatcher(r))
-	}
-
-	return m
-}
-
-func (m *matchinator) WithRequiredLabels(labels ...string) Matchinator {
-	if len(labels) == 0 {
-		return m
-	}
-
-	for _, l := range labels {
-		m.matchFuncs = append(m.matchFuncs, RequiredLabelAsGitHubItemMatcher(l))
 	}
 
 	return m
