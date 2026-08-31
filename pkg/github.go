@@ -89,9 +89,11 @@ type GitHubSearchFilter struct {
 }
 
 // quoteSearchTerm wraps a value in quotes when it holds characters that would
-// otherwise terminate the qualifier.
+// otherwise terminate the qualifier, or, in the case of a comma, split one value
+// into several: comma is the OR separator inside a comma-joined label:
+// qualifier, so an unquoted comma silently widens the search.
 func quoteSearchTerm(s string) string {
-	if !strings.ContainsAny(s, " \t\"") {
+	if !strings.ContainsAny(s, " \t\",") {
 		return s
 	}
 
@@ -131,16 +133,27 @@ func (f *GitHubSearchFilter) asSearchQuery() string {
 		}
 	}
 
-	if len(f.AnyLabels) > 0 {
-		quoted := make([]string, 0, len(f.AnyLabels))
-		for _, l := range f.AnyLabels {
-			quoted = append(quoted, quoteSearchTerm(l))
+	// An empty value renders a bare label: qualifier, which GitHub cannot act on,
+	// so the whole query would fail or match nothing every poll.
+	quoted := make([]string, 0, len(f.AnyLabels))
+
+	for _, l := range f.AnyLabels {
+		if l == "" {
+			continue
 		}
 
+		quoted = append(quoted, quoteSearchTerm(l))
+	}
+
+	if len(quoted) > 0 {
 		terms = append(terms, "label:"+strings.Join(quoted, ","))
 	}
 
 	for _, l := range f.RequiredLabels {
+		if l == "" {
+			continue
+		}
+
 		terms = append(terms, "label:"+quoteSearchTerm(l))
 	}
 

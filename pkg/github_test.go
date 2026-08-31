@@ -162,28 +162,45 @@ func TestPullRequestNodeAsGitHubItemCarriesMergedState(t *testing.T) {
 // GraphQL returns a flat object for a union node and the decoder assigns by
 // field name, so a PullRequest result populates the Issue struct too: both
 // fragments select the same field names. Only __typename distinguishes them, and
-// picking the first non-zero fragment reported every PR as an issue.
+// picking the first non-zero fragment reported every PR as an issue. A
+// hand-built node cannot catch a regression here, because the bug lives in what
+// the decoder does to the wire payload, so this drives real JSON through it.
 func TestSearchNodeUsesTypenameNotWhichFragmentLooksFilled(t *testing.T) {
-	// Both fragments populated, exactly as the decoder leaves them on the wire.
-	node := &gitHubSearchNode{Typename: "PullRequest"}
-	node.Issue.ID = githubv4.ID("shared")
-	node.Issue.Number = 3
-	node.Issue.State = githubv4.IssueStateOpen
-	node.PullRequest.ID = githubv4.ID("shared")
-	node.PullRequest.Number = 3
-	node.PullRequest.State = githubv4.PullRequestStateMerged
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"search":{"issueCount":2,`+
+			`"pageInfo":{"endCursor":"","hasNextPage":false},"nodes":[`+
+			`{"__typename":"PullRequest","id":"PR_1","number":9,"state":"MERGED",`+
+			`"title":"a pr","bodyText":"b","repository":{"name":"n","owner":{"login":"o"}}},`+
+			`{"__typename":"Issue","id":"I_1","number":1,"state":"OPEN",`+
+			`"title":"an issue","bodyText":"b","repository":{"name":"n","owner":{"login":"o"}}}`+
+			`]}}}`)
+	}))
+	defer srv.Close()
 
-	item := node.asGitHubItem()
-	assert.Assert(t, item != nil)
-	assert.Equal(t, item.Type, GitHubItemPullRequest)
+	vars := &gitHubSearchQueryVars{
+		Q:            githubv4.String("repo:o/n"),
+		Type:         githubv4.SearchTypeIssue,
+		SearchCursor: (*githubv4.String)(nil),
+		N:            100,
+	}
+
+	query := gitHubSearchQuery{}
+	err := githubv4.NewEnterpriseClient(srv.URL, srv.Client()).
+		Query(context.Background(), &query, vars.AsMap())
+	assert.NilError(t, err)
+	assert.Equal(t, len(query.Search.Nodes), 2)
+
+	pr := query.Search.Nodes[0].asGitHubItem()
+	assert.Assert(t, pr != nil)
+	assert.Equal(t, pr.Type, GitHubItemPullRequest)
 	// Taking the wrong fragment would also report the wrong state.
-	assert.Equal(t, item.State, GitHubItemStateMerged)
+	assert.Equal(t, pr.State, GitHubItemStateMerged)
 
-	node.Typename = "Issue"
-	item = node.asGitHubItem()
-	assert.Assert(t, item != nil)
-	assert.Equal(t, item.Type, GitHubItemIssue)
-	assert.Equal(t, item.State, GitHubItemStateOpen)
+	issue := query.Search.Nodes[1].asGitHubItem()
+	assert.Assert(t, issue != nil)
+	assert.Equal(t, issue.Type, GitHubItemIssue)
+	assert.Equal(t, issue.State, GitHubItemStateOpen)
 }
 
 // search type ISSUE can also return other node kinds; anything unrecognised is
@@ -268,6 +285,51 @@ func TestAsSearchQueryCombinesAnyAndRequiredLabels(t *testing.T) {
 		t, f.asSearchQuery(),
 		`repo:o/n label:bug,regression label:"needs triage"`,
 	)
+}
+
+// Comma is the OR separator inside a comma-joined label: qualifier, so a label
+// that holds one has to be quoted or it becomes two ORed labels: a wider search
+// than the one that was configured.
+func TestAsSearchQueryQuotesLabelsContainingCommas(t *testing.T) {
+	repos := []GitHubRepository{{Owner: "o", Name: "n"}}
+
+	anyOf := &GitHubSearchFilter{Repositories: repos, AnyLabels: []string{"kind/bug,urgent"}}
+	assert.Equal(t, anyOf.asSearchQuery(), `repo:o/n label:"kind/bug,urgent"`)
+
+	required := &GitHubSearchFilter{
+		Repositories: repos, RequiredLabels: []string{"kind/bug,urgent"},
+	}
+	assert.Equal(t, required.asSearchQuery(), `repo:o/n label:"kind/bug,urgent"`)
+}
+
+// Comma plays two roles in one qualifier: the separator between ORed values, and
+// a literal inside a single value. Quoting is per value and the join happens
+// after, so the separator is never quoted. GitHub accepts a quoted member of a
+// comma list and treats it identically to an unquoted one.
+func TestAsSearchQueryQuotesOnlyTheValueNotTheSeparator(t *testing.T) {
+	f := &GitHubSearchFilter{
+		Repositories: []GitHubRepository{{Owner: "o", Name: "n"}},
+		AnyLabels:    []string{"kind/bug,urgent", "sig/node"},
+	}
+
+	// One label literally named "kind/bug,urgent", ORed with "sig/node" — not
+	// three labels, and not one label named `kind/bug,urgent,sig/node`.
+	assert.Equal(t, f.asSearchQuery(), `repo:o/n label:"kind/bug,urgent",sig/node`)
+}
+
+// A bare label: qualifier is not a query GitHub can act on, so an empty value is
+// dropped rather than rendered.
+func TestAsSearchQueryDropsEmptyLabels(t *testing.T) {
+	repos := []GitHubRepository{{Owner: "o", Name: "n"}}
+
+	onlyEmpty := &GitHubSearchFilter{Repositories: repos, AnyLabels: []string{""}}
+	assert.Equal(t, onlyEmpty.asSearchQuery(), "repo:o/n")
+
+	someEmpty := &GitHubSearchFilter{Repositories: repos, AnyLabels: []string{"bug", ""}}
+	assert.Equal(t, someEmpty.asSearchQuery(), "repo:o/n label:bug")
+
+	required := &GitHubSearchFilter{Repositories: repos, RequiredLabels: []string{"", "x"}}
+	assert.Equal(t, required.asSearchQuery(), "repo:o/n label:x")
 }
 
 // checkOrgAgainst stands up a GraphQL server returning the given repositoryOwner
