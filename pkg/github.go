@@ -22,9 +22,39 @@ const (
 	GitHubItemPullRequest GitHubItemType = "pullRequest"
 )
 
-// GitHubNotFoundError is raised when a GitHubinator cannot find the given item. It is a special error that can be
-// used to debug why a request failed.
-type GitHubNotFoundError error
+// gitHubNotFoundErrStr is how GitHub opens the message for an entity it cannot
+// resolve. The response also carries type: NOT_FOUND, but shurcooL/graphql keeps
+// only Message when it decodes the error array, so the string is all that
+// survives to be matched on.
+const gitHubNotFoundErrStr = "Could not resolve to a"
+
+// GitHubNotFoundError reports that GitHub could not resolve a requested entity.
+//
+// It is a struct rather than the `type GitHubNotFoundError error` it replaces:
+// that declared an interface with the same method set as error, so every non-nil
+// error satisfied it and a `case GitHubNotFoundError` type switch matched
+// auth failures, rate limiting and network errors alike. Match it with errors.As.
+type GitHubNotFoundError struct {
+	err error
+}
+
+func (e *GitHubNotFoundError) Error() string {
+	return e.err.Error()
+}
+
+func (e *GitHubNotFoundError) Unwrap() error {
+	return e.err
+}
+
+// asNotFoundError wraps err when GitHub is reporting a missing entity, so callers
+// can tell "does not exist" apart from "could not ask".
+func asNotFoundError(err error) error {
+	if err == nil || !strings.Contains(err.Error(), gitHubNotFoundErrStr) {
+		return err
+	}
+
+	return &GitHubNotFoundError{err: err}
+}
 
 // GitHubActor represents something that can take actions on GitHub (ie a user or bot).
 // It is associated with the following GraphQL interface:
@@ -736,7 +766,7 @@ func (gh *gitHubinator) CheckRepository(ctx context.Context, ghr GitHubRepositor
 
 		MetricRepoQueryErrorTotal.Inc()
 
-		return err
+		return asNotFoundError(err)
 	}
 
 	queryLogger.Debug("response on check repository query", "result", query)
@@ -766,14 +796,17 @@ func (gh *gitHubinator) CheckOrganization(ctx context.Context, login string) err
 
 		MetricOrgQueryErrorTotal.Inc()
 
-		return err
+		return asNotFoundError(err)
 	}
 
 	queryLogger.Debug("response on check organization query", "result", query)
 
-	// A login that resolves to nothing comes back as a null owner, not an error.
+	// A login that resolves to nothing comes back as a null owner, not an error,
+	// so this is the not-found case rather than a failure to ask.
 	if len(query.RepositoryOwner.Login) == 0 {
-		return fmt.Errorf("no such organization '%s'", login)
+		return &GitHubNotFoundError{
+			err: fmt.Errorf("no such organization '%s'", login),
+		}
 	}
 
 	if query.RepositoryOwner.Typename != "Organization" {

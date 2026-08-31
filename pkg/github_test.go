@@ -3,6 +3,7 @@ package pkg
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -367,4 +368,36 @@ func TestCheckOrganizationRejectsUser(t *testing.T) {
 func TestCheckOrganizationAcceptsOrganization(t *testing.T) {
 	err := checkOrgAgainst(t, `{"__typename":"Organization","login":"some-login"}`)
 	assert.NilError(t, err)
+}
+
+// GitHubNotFoundError used to be declared `type GitHubNotFoundError error`, an
+// interface with error's method set, so every error matched a type switch on it
+// and check reported "does not exist" for auth and network failures too.
+func TestNotFoundErrorDoesNotSwallowUnrelatedErrors(t *testing.T) {
+	var notFound *GitHubNotFoundError
+
+	transient := errors.New("some transient network failure")
+	assert.Assert(t, !errors.As(asNotFoundError(transient), &notFound))
+
+	// shurcooL/graphql keeps only the message, so this string is the only signal
+	// GitHub's type: NOT_FOUND leaves behind.
+	missing := errors.New("Could not resolve to a Repository with the name 'o/n'.")
+	wrapped := asNotFoundError(missing)
+	assert.Assert(t, errors.As(wrapped, &notFound))
+	// The original message has to survive for check to print something useful.
+	assert.Equal(t, wrapped.Error(), missing.Error())
+	assert.Equal(t, errors.Unwrap(wrapped), missing)
+
+	assert.Assert(t, asNotFoundError(nil) == nil)
+}
+
+// A login that resolves to nothing is a genuine not-found, so it must carry the
+// same type as a GraphQL NOT_FOUND rather than being an opaque error.
+func TestCheckOrganizationMissingOwnerIsNotFound(t *testing.T) {
+	var notFound *GitHubNotFoundError
+	assert.Assert(t, errors.As(checkOrgAgainst(t, `null`), &notFound))
+
+	// A user is a real owner, just the wrong kind: not a not-found.
+	err := checkOrgAgainst(t, `{"__typename":"User","login":"some-login"}`)
+	assert.Assert(t, !errors.As(err, &notFound))
 }

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -22,6 +23,20 @@ func init() {
 	rootCmd.AddCommand(checkCmd)
 }
 
+// exitForCheckError reports rc 2 only when GitHub said the entity does not
+// exist. Anything else (auth, rate limiting, network) is rc 1: the check could
+// not be made, which is not the same answer as "missing".
+func exitForCheckError(err error) {
+	fmt.Println(err)
+
+	var notFound *pkg.GitHubNotFoundError
+	if errors.As(err, &notFound) {
+		os.Exit(2)
+	}
+
+	os.Exit(1)
+}
+
 func doCheck() {
 	whoAmI()
 
@@ -30,27 +45,13 @@ func doCheck() {
 	for _, w := range cfg.Watches {
 		for _, r := range w.Repositories {
 			if err := gh.CheckRepository(ctx, r); err != nil {
-				fmt.Println(err)
-
-				switch err.(type) {
-				case pkg.GitHubNotFoundError:
-					os.Exit(2)
-				default:
-					os.Exit(1)
-				}
+				exitForCheckError(err)
 			}
 		}
 
 		for _, o := range w.Organizations {
 			if err := gh.CheckOrganization(ctx, o); err != nil {
-				fmt.Println(err)
-
-				switch err.(type) {
-				case pkg.GitHubNotFoundError:
-					os.Exit(2)
-				default:
-					os.Exit(1)
-				}
+				exitForCheckError(err)
 			}
 		}
 	}
