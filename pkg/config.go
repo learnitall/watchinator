@@ -200,8 +200,12 @@ func (a *ActionConfig) Validate(ctx context.Context) error {
 type Watch struct {
 	// Name is a human-readable description of the watch.
 	Name string `yaml:"name"`
-	// Repositories to watch issues from.
+	// Repositories to watch items from. A watch needs at least one repository or
+	// organization; the two are ORed together, not intersected.
 	Repositories []GitHubRepository `yaml:"repos"`
+	// Organizations to watch items from, covering every repository the org owns
+	// that the PAT can see.
+	Organizations []string `yaml:"orgs"`
 	// Selectors are used to specify which items to watch, follows the k8s label selector syntax.
 	// See the GitHubItem struct for valid keys and fields and
 	// https://pkg.go.dev/k8s.io/apimachinery@v0.27.1/pkg/labels#Parse for the syntax.
@@ -229,6 +233,7 @@ func (w *Watch) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("name", w.Name),
 		slog.Any("repos", w.Repositories),
+		slog.Any("orgs", w.Organizations),
 		slog.Any("selectors", w.Selectors),
 		slog.Any("requiredLabels", w.RequiredLabels),
 		slog.Any("searchLabels", w.SearchLabels),
@@ -248,8 +253,8 @@ func (w *Watch) ValidateAndPopulate(ctx context.Context, gh GitHubinator) error 
 		return fmt.Errorf("name cannot be empty")
 	}
 
-	if len(w.Repositories) == 0 {
-		return fmt.Errorf("expected at least one repository")
+	if len(w.Repositories) == 0 && len(w.Organizations) == 0 {
+		return fmt.Errorf("expected at least one repository or organization")
 	}
 
 	// These must be the exported fields: the unexported parsed forms are only populated further down.
@@ -261,6 +266,12 @@ func (w *Watch) ValidateAndPopulate(ctx context.Context, gh GitHubinator) error 
 	for _, r := range w.Repositories {
 		if err := gh.CheckRepository(ctx, r); err != nil {
 			return fmt.Errorf("unable to validate repository %+v: %w", r, err)
+		}
+	}
+
+	for _, o := range w.Organizations {
+		if err := gh.CheckOrganization(ctx, o); err != nil {
+			return fmt.Errorf("unable to validate organization %s: %w", o, err)
 		}
 	}
 
@@ -323,12 +334,15 @@ func (w *Watch) ValidateAndPopulate(ctx context.Context, gh GitHubinator) error 
 	return nil
 }
 
-// GetIssueFilter returns a GitHubIssueFilter based on the Watch's specified SearchLabels and States. It can
-// be passed to a GitHubinator for listing issues that match the Watch.
-func (w *Watch) GetIssueFilter() *GitHubIssueFilter {
-	return &GitHubIssueFilter{
-		Labels: w.SearchLabels,
-		States: w.States,
+// GetSearchFilter returns a GitHubSearchFilter based on the Watch's scope,
+// SearchLabels and States. It can be passed to a GitHubinator for listing items
+// that match the Watch.
+func (w *Watch) GetSearchFilter() *GitHubSearchFilter {
+	return &GitHubSearchFilter{
+		Repositories:  w.Repositories,
+		Organizations: w.Organizations,
+		Labels:        w.SearchLabels,
+		States:        w.States,
 	}
 }
 

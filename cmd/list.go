@@ -43,34 +43,29 @@ func doList(watchName string) {
 	}
 
 	matcher := watch.GetMatchinator()
-	issueFilter := watch.GetIssueFilter()
-	numRepos := len(watch.Repositories)
+	searchFilter := watch.GetSearchFilter()
+
+	items, err := gh.ListIssues(ctx, searchFilter, matcher)
+	if err != nil {
+		fmt.Printf("unable to list items: %s\n", err)
+		os.Exit(1)
+	}
 
 	buf := bytes.Buffer{}
 	buf.WriteString("[")
 
-	for repoIndex, r := range watch.Repositories {
-		issues, err := gh.ListIssues(ctx, r, issueFilter, matcher)
+	for i, item := range items {
+		marshalled, err := json.Marshal(item)
 		if err != nil {
-			fmt.Printf("unable to list issues: %s\n", err)
-			os.Exit(1)
+			fmt.Printf("unable to marshal item to json '%+v': %s\n", item, err)
+
+			return
 		}
 
-		numIssues := len(issues)
+		buf.Write(marshalled)
 
-		for issueIndex, issue := range issues {
-			marshalled, err := json.Marshal(issue)
-			if err != nil {
-				fmt.Printf("unable to marshal issue to json '%+v': %s\n", issue, err)
-
-				return
-			}
-
-			buf.Write(marshalled)
-
-			if repoIndex != numRepos-1 || issueIndex != numIssues-1 {
-				buf.WriteString(",")
-			}
+		if i != len(items)-1 {
+			buf.WriteString(",")
 		}
 	}
 

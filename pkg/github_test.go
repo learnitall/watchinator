@@ -8,37 +8,58 @@ import (
 )
 
 func TestAsSearchQueryScopesToRepoAndIssues(t *testing.T) {
-	f := &GitHubIssueFilter{}
+	f := &GitHubSearchFilter{
+		Repositories: []GitHubRepository{{Owner: "learnitall", Name: "watchinator"}},
+	}
+
+	assert.Equal(t, f.asSearchQuery(), "repo:learnitall/watchinator is:issue")
+}
+
+// Repeated scope qualifiers are ORed by GitHub, including repo: mixed with org:,
+// which is why every scope goes into a single query.
+func TestAsSearchQueryCombinesEveryScope(t *testing.T) {
+	f := &GitHubSearchFilter{
+		Repositories: []GitHubRepository{
+			{Owner: "golang", Name: "go"},
+			{Owner: "learnitall", Name: "watchinator"},
+		},
+		Organizations: []string{"ngrok", "kubernetes"},
+	}
 
 	assert.Equal(
 		t,
-		f.asSearchQuery(GitHubRepository{Owner: "learnitall", Name: "watchinator"}),
-		"repo:learnitall/watchinator is:issue",
+		f.asSearchQuery(),
+		"repo:golang/go repo:learnitall/watchinator org:ngrok org:kubernetes is:issue",
 	)
+}
+
+func TestAsSearchQueryScopesToOrgAlone(t *testing.T) {
+	f := &GitHubSearchFilter{Organizations: []string{"ngrok"}}
+
+	assert.Equal(t, f.asSearchQuery(), "org:ngrok is:issue")
 }
 
 func TestAsSearchQueryOrsLabels(t *testing.T) {
-	f := &GitHubIssueFilter{Labels: []string{"bug", "needs triage"}}
+	f := &GitHubSearchFilter{
+		Repositories: []GitHubRepository{{Owner: "o", Name: "n"}},
+		Labels:       []string{"bug", "needs triage"},
+	}
 
 	// Comma-joined values inside one qualifier are ORed by GitHub; the label with
 	// a space has to be quoted or it would terminate the qualifier early.
-	assert.Equal(
-		t,
-		f.asSearchQuery(GitHubRepository{Owner: "o", Name: "n"}),
-		`repo:o/n is:issue label:bug,"needs triage"`,
-	)
+	assert.Equal(t, f.asSearchQuery(), `repo:o/n is:issue label:bug,"needs triage"`)
 }
 
 func TestAsSearchQueryOnlyConstrainsASingleState(t *testing.T) {
-	repo := GitHubRepository{Owner: "o", Name: "n"}
+	repos := []GitHubRepository{{Owner: "o", Name: "n"}}
 
-	single := &GitHubIssueFilter{States: []string{"OPEN"}}
-	assert.Equal(t, single.asSearchQuery(repo), "repo:o/n is:issue state:open")
+	single := &GitHubSearchFilter{Repositories: repos, States: []string{"OPEN"}}
+	assert.Equal(t, single.asSearchQuery(), "repo:o/n is:issue state:open")
 
 	// Every state named is the same as no constraint, and two state qualifiers
 	// would AND into a contradiction.
-	both := &GitHubIssueFilter{States: []string{"OPEN", "CLOSED"}}
-	assert.Equal(t, both.asSearchQuery(repo), "repo:o/n is:issue")
+	both := &GitHubSearchFilter{Repositories: repos, States: []string{"OPEN", "CLOSED"}}
+	assert.Equal(t, both.asSearchQuery(), "repo:o/n is:issue")
 }
 
 func TestIssueNodeAsGitHubItemMapsFields(t *testing.T) {
@@ -58,6 +79,7 @@ func TestIssueNodeAsGitHubItemMapsFields(t *testing.T) {
 	item := n.asGitHubItem()
 	assert.Assert(t, item != nil)
 	assert.Equal(t, item.Type, GitHubItemIssue)
+	// The repo comes off the node, not the caller, so one search can span scopes.
 	assert.Equal(t, item.Repo.Owner, "learnitall")
 	assert.Equal(t, item.Repo.Name, "watchinator")
 	assert.Equal(t, item.Number, int32(7))

@@ -29,7 +29,7 @@ type watchinator struct {
 func (w *watchinator) getPollCallback(
 	ctx context.Context, gh GitHubinator, e Emailinator, watch *Watch,
 ) func(t time.Time) {
-	filter := watch.GetIssueFilter()
+	filter := watch.GetSearchFilter()
 	matchinator := watch.GetMatchinator()
 	actioninator := watch.GetActioninator(gh, e)
 
@@ -39,34 +39,33 @@ func (w *watchinator) getPollCallback(
 
 	return func(t time.Time) {
 		logger := w.logger.With("time", t, "watch", watch.Name)
+		logger.Info("updating watch")
 
-		for _, r := range watch.Repositories {
-			repoLogger := logger.With("repo", r)
-			repoLogger.Info("updating repo")
+		// One search covers every repository and organization in the watch, so
+		// there is no per-repository fan-out here any more.
+		items, err := gh.ListIssues(ctx, filter, matchinator)
+		if err != nil {
+			logger.Error("unable to list items from GitHub", LogKeyError, err)
 
-			issues, err := gh.ListIssues(ctx, r, filter, matchinator)
-			if err != nil {
-				repoLogger.Error("unable to list issues from GitHub", LogKeyError, err)
+			errorMetric.Inc()
+
+			return
+		}
+
+		for _, i := range items {
+			itemLogger := logger.With(
+				"item",
+				slog.GroupValue(
+					slog.String("repo", i.Repo.Owner+"/"+i.Repo.Name),
+					slog.Int("number", int(i.Number)),
+					slog.String("title", i.Title),
+				),
+			)
+
+			if err := actioninator.Handle(ctx, *i, itemLogger); err != nil {
+				itemLogger.Error("unable to handle item", LogKeyError, err)
 
 				errorMetric.Inc()
-
-				continue
-			}
-
-			for _, i := range issues {
-				issueLogger := repoLogger.With(
-					"issue",
-					slog.GroupValue(
-						slog.Int("number", int(i.Number)),
-						slog.String("title", i.Title),
-					),
-				)
-
-				if err := actioninator.Handle(ctx, *i, issueLogger); err != nil {
-					issueLogger.Error("unable to handle issue", LogKeyError, err)
-
-					errorMetric.Inc()
-				}
 			}
 		}
 	}

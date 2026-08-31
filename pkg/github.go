@@ -103,11 +103,14 @@ func NewTestGitHubIssue() *GitHubIssue {
 	}
 }
 
-// GitHubIssueFilter narrows which items GitHub returns before any client-side
-// matching runs. It is rendered into a GitHub search query string.
-type GitHubIssueFilter struct {
-	Labels []string
-	States []string
+// GitHubSearchFilter describes what GitHub should return before any client-side
+// matching runs: which repositories or organizations to look in, and how to
+// narrow within them. It is rendered into a GitHub search query string.
+type GitHubSearchFilter struct {
+	Repositories  []GitHubRepository
+	Organizations []string
+	Labels        []string
+	States        []string
 }
 
 // quoteSearchTerm wraps a value in quotes when it holds characters that would
@@ -120,16 +123,26 @@ func quoteSearchTerm(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
 }
 
-// asSearchQuery renders the filter as a GitHub search query scoped to ghr.
-// Values comma-joined inside a single qualifier are ORed by GitHub, which is the
+// asSearchQuery renders the filter as a GitHub search query.
+//
+// Repeated scope qualifiers are ORed by GitHub, including when repo: and org:
+// are mixed, so every scope belongs in one query rather than one query each.
+// Values comma-joined inside a single qualifier are likewise ORed, which is the
 // semantic SearchLabels documents ("at least one of these labels"). Note that
 // the repository.issues connection this replaced ANDed them instead.
-func (f *GitHubIssueFilter) asSearchQuery(ghr GitHubRepository) string {
-	terms := []string{
-		"repo:" + quoteSearchTerm(ghr.Owner+"/"+ghr.Name),
-		// search type ISSUE covers pull requests too; this keeps it to issues.
-		"is:issue",
+func (f *GitHubSearchFilter) asSearchQuery() string {
+	terms := []string{}
+
+	for _, r := range f.Repositories {
+		terms = append(terms, "repo:"+quoteSearchTerm(r.Owner+"/"+r.Name))
 	}
+
+	for _, o := range f.Organizations {
+		terms = append(terms, "org:"+quoteSearchTerm(o))
+	}
+
+	// search type ISSUE covers pull requests too; this keeps it to issues.
+	terms = append(terms, "is:issue")
 
 	if len(f.Labels) > 0 {
 		quoted := make([]string, 0, len(f.Labels))
@@ -262,6 +275,34 @@ func (v *gitHubRepositoryQueryVars) AsMap() map[string]any {
 	return map[string]any{
 		"name":  v.Name,
 		"owner": v.Owner,
+	}
+}
+
+type gitHubOrganizationQuery struct {
+	Organization struct {
+		Login githubv4.String
+	} `graphql:"organization(login: $login)"`
+}
+
+func (q gitHubOrganizationQuery) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("login", string(q.Organization.Login)),
+	)
+}
+
+type gitHubOrganizationQueryVars struct {
+	Login githubv4.String
+}
+
+func (v gitHubOrganizationQueryVars) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("login", string(v.Login)),
+	)
+}
+
+func (v *gitHubOrganizationQueryVars) AsMap() map[string]any {
+	return map[string]any{
+		"login": v.Login,
 	}
 }
 
@@ -399,9 +440,13 @@ type GitHubinator interface {
 	// CheckRepository checks if the given repository exists.
 	CheckRepository(ctx context.Context, ghr GitHubRepository) error
 
-	// ListIssues returns a list of issues for the given repository.
+	// CheckOrganization checks if the given organization exists.
+	CheckOrganization(ctx context.Context, login string) error
+
+	// ListIssues returns the issues matching the given filter across every
+	// repository and organization the filter scopes to.
 	ListIssues(
-		ctx context.Context, ghr GitHubRepository, filter *GitHubIssueFilter, matcher Matchinator,
+		ctx context.Context, filter *GitHubSearchFilter, matcher Matchinator,
 	) ([]*GitHubItem, error)
 
 	// SetSubscription sets the subscription state of the given item for the viewer.
@@ -416,6 +461,12 @@ type MockGitHubinator struct {
 
 	// CheckRepositoryError holds the returned error for CheckRepository.
 	CheckRepositoryError error
+
+	// CheckOrganizationRequests holds the parameters to calls to CheckOrganization.
+	CheckOrganizationRequests []string
+
+	// CheckOrganizationError holds the returned error for CheckOrganization.
+	CheckOrganizationError error
 
 	// WhoAmIRequests holds the number of times WhoAmI has been called
 	WhoAmIRequests int
@@ -451,8 +502,14 @@ func (t *MockGitHubinator) CheckRepository(ctx context.Context, ghr GitHubReposi
 	return t.CheckRepositoryError
 }
 
+func (t *MockGitHubinator) CheckOrganization(ctx context.Context, login string) error {
+	t.CheckOrganizationRequests = append(t.CheckOrganizationRequests, login)
+
+	return t.CheckOrganizationError
+}
+
 func (t *MockGitHubinator) ListIssues(
-	ctx context.Context, ghr GitHubRepository, filter *GitHubIssueFilter, matcher Matchinator,
+	ctx context.Context, filter *GitHubSearchFilter, matcher Matchinator,
 ) ([]*GitHubItem, error) {
 	return nil, nil
 }
@@ -468,13 +525,15 @@ func (t *MockGitHubinator) SetSubscription(
 // NewMockGitHubinator creates a new MockGitHubinator instance with pre-populated, non-error return values.
 func NewMockGitHubinator() *MockGitHubinator {
 	return &MockGitHubinator{
-		CheckRepositoryRequests: []GitHubRepository{},
-		CheckRepositoryError:    nil,
-		WhoAmIRequests:          0,
-		WhoAmIReturn:            "user",
-		WhoAmIError:             nil,
-		SetSubscriptionRequests: []githubv4.ID{},
-		SetSubscriptionError:    nil,
+		CheckRepositoryRequests:   []GitHubRepository{},
+		CheckRepositoryError:      nil,
+		CheckOrganizationRequests: []string{},
+		CheckOrganizationError:    nil,
+		WhoAmIRequests:            0,
+		WhoAmIReturn:              "user",
+		WhoAmIError:               nil,
+		SetSubscriptionRequests:   []githubv4.ID{},
+		SetSubscriptionError:      nil,
 	}
 }
 
@@ -588,9 +647,38 @@ func (gh *gitHubinator) CheckRepository(ctx context.Context, ghr GitHubRepositor
 	return nil
 }
 
+func (gh *gitHubinator) CheckOrganization(ctx context.Context, login string) error {
+	if gh.client == nil {
+		gh.setupClient()
+	}
+
+	query := gitHubOrganizationQuery{}
+
+	vars := gitHubOrganizationQueryVars{
+		Login: githubv4.String(login),
+	}
+
+	queryLogger := gh.logger.With("vars", vars)
+	queryLogger.Debug("executing check organization query")
+
+	MetricOrgQueryTotal.Inc()
+
+	err := gh.client.Query(ctx, &query, vars.AsMap())
+	if err != nil {
+		queryLogger.Debug("got error on check organization query", LogKeyError, err)
+
+		MetricOrgQueryErrorTotal.Inc()
+
+		return err
+	}
+
+	queryLogger.Debug("response on check organization query", "result", query)
+
+	return nil
+}
+
 func (gh *gitHubinator) ListIssues(
-	ctx context.Context, ghr GitHubRepository, filter *GitHubIssueFilter,
-	matcher Matchinator,
+	ctx context.Context, filter *GitHubSearchFilter, matcher Matchinator,
 ) ([]*GitHubItem, error) {
 	if gh.client == nil {
 		gh.setupClient()
@@ -599,7 +687,7 @@ func (gh *gitHubinator) ListIssues(
 	query := &gitHubSearchQuery{}
 
 	vars := &gitHubSearchQueryVars{
-		Q:            githubv4.String(filter.asSearchQuery(ghr)),
+		Q:            githubv4.String(filter.asSearchQuery()),
 		Type:         githubv4.SearchTypeIssue,
 		SearchCursor: (*githubv4.String)(nil),
 		N:            100,

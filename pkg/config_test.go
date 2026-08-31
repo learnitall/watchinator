@@ -438,3 +438,29 @@ func TestConfiginatorCanWatchForChanges(t *testing.T) {
 
 	assert.ErrorIs(t, err, context.Canceled)
 }
+
+func TestWatchValidateAcceptsOrgOnlyScope(t *testing.T) {
+	ctx := context.Background()
+	gh := NewMockGitHubinator()
+	w := NewTestWatch()
+
+	// An org is a scope in its own right; a watch does not need a repo list.
+	w.Repositories = nil
+	w.Organizations = []string{"ngrok"}
+
+	assert.NilError(t, w.ValidateAndPopulate(ctx, gh))
+	assert.DeepEqual(t, gh.CheckOrganizationRequests, []string{"ngrok"})
+}
+
+func TestWatchValidateRejectsWatchWithNoScope(t *testing.T) {
+	ctx := context.Background()
+	gh := NewMockGitHubinator()
+	w := NewTestWatch()
+
+	w.Repositories = nil
+	w.Organizations = nil
+
+	assert.ErrorContains(
+		t, w.ValidateAndPopulate(ctx, gh), "at least one repository or organization",
+	)
+}

@@ -68,6 +68,18 @@ var (
 			Help: "The total number of errors observed during repo queries against GitHub",
 		},
 	)
+	MetricOrgQueryTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "watchinator_org_query_total",
+			Help: "The total number of organization queries that have been made against GitHub",
+		},
+	)
+	MetricOrgQueryErrorTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "watchinator_org_query_error_total",
+			Help: "The total number of errors observed during organization queries against GitHub",
+		},
+	)
 	MetricSearchQueryTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "watchinator_search_query_total",
