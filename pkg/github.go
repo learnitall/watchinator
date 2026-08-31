@@ -276,15 +276,23 @@ func (v *gitHubRepositoryQueryVars) AsMap() map[string]any {
 	}
 }
 
+// gitHubOrganizationQuery checks an organization exists.
+//
+// It goes through repositoryOwner rather than organization because
+// Organization.login requires the read:org scope, which nothing else here needs:
+// using org: as a search qualifier does not. repositoryOwner resolves users too,
+// so __typename is what confirms the login really is an organization.
 type gitHubOrganizationQuery struct {
-	Organization struct {
-		Login githubv4.String
-	} `graphql:"organization(login: $login)"`
+	RepositoryOwner struct {
+		Typename githubv4.String `graphql:"__typename"`
+		Login    githubv4.String
+	} `graphql:"repositoryOwner(login: $login)"`
 }
 
 func (q gitHubOrganizationQuery) LogValue() slog.Value {
 	return slog.GroupValue(
-		slog.String("login", string(q.Organization.Login)),
+		slog.String("typename", string(q.RepositoryOwner.Typename)),
+		slog.String("login", string(q.RepositoryOwner.Login)),
 	)
 }
 
@@ -742,6 +750,18 @@ func (gh *gitHubinator) CheckOrganization(ctx context.Context, login string) err
 	}
 
 	queryLogger.Debug("response on check organization query", "result", query)
+
+	// A login that resolves to nothing comes back as a null owner, not an error.
+	if len(query.RepositoryOwner.Login) == 0 {
+		return fmt.Errorf("no such organization '%s'", login)
+	}
+
+	if query.RepositoryOwner.Typename != "Organization" {
+		return fmt.Errorf(
+			"'%s' is a %s, not an organization; use repos to watch a user's repositories",
+			login, query.RepositoryOwner.Typename,
+		)
+	}
 
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/shurcooL/githubv4"
+	"golang.org/x/exp/slog"
 	"gotest.tools/v3/assert"
 )
 
@@ -242,4 +243,41 @@ func TestSearchQueryRequestsBothFragments(t *testing.T) {
 	// as these disappearing from the document.
 	assert.Assert(t, strings.Contains(parsed.Query, "labels(first: 100)"), parsed.Query)
 	assert.Assert(t, strings.Contains(parsed.Query, "bodyText"), parsed.Query)
+}
+
+// checkOrgAgainst stands up a GraphQL server returning the given repositoryOwner
+// payload, so CheckOrganization's branches can be exercised without a PAT.
+func checkOrgAgainst(t *testing.T, ownerJSON string) error {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"data":{"repositoryOwner":%s}}`, ownerJSON)
+	}))
+	defer srv.Close()
+
+	gh := &gitHubinator{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		client: githubv4.NewEnterpriseClient(srv.URL, srv.Client()),
+	}
+
+	return gh.CheckOrganization(context.Background(), "some-login")
+}
+
+// A login that resolves to nothing comes back as a null owner rather than an
+// error, so a typo would otherwise validate clean.
+func TestCheckOrganizationRejectsMissingOwner(t *testing.T) {
+	assert.ErrorContains(t, checkOrgAgainst(t, `null`), "no such organization")
+}
+
+// repositoryOwner also resolves users, but org: as a search qualifier does not
+// match them, so a username here would silently return nothing.
+func TestCheckOrganizationRejectsUser(t *testing.T) {
+	err := checkOrgAgainst(t, `{"__typename":"User","login":"some-login"}`)
+	assert.ErrorContains(t, err, "is a User, not an organization")
+}
+
+func TestCheckOrganizationAcceptsOrganization(t *testing.T) {
+	err := checkOrgAgainst(t, `{"__typename":"Organization","login":"some-login"}`)
+	assert.NilError(t, err)
 }
