@@ -2,7 +2,10 @@ package pkg
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -816,7 +819,92 @@ func (gh *gitHubinator) CheckOrganization(ctx context.Context, login string) err
 		)
 	}
 
-	return nil
+	return gh.probeOrganizationAccess(ctx, login)
+}
+
+// gitHubRESTBaseURL is the REST host used by probeOrganizationAccess. Overridden
+// in tests to point at an httptest server.
+var gitHubRESTBaseURL = "https://api.github.com"
+
+// probeOrganizationAccess asks REST whether a policy refuses this token for the
+// organization, because GraphQL will not say.
+//
+// A token that is not SSO-authorized for a SAML-protected org gets zeros rather
+// than errors from every GraphQL field that matters: search returns
+// issueCount 0, organization.repositories returns totalCount 0, and
+// repositoryOwner resolves normally. So an org-scoped watch passes validation,
+// polls forever, matches nothing and reports no error — the exact blindness
+// watchinator exists to avoid. REST answers with 403 and names the fix.
+//
+// What a 200 does not prove: org metadata is public, so an anonymous request
+// gets 200 even for an org whose every repository is private. A token that is
+// SSO-authorized but lacks the scope to see the content therefore still passes
+// here and still polls zero items. Catching that would mean counting visible
+// repositories, which cannot be told apart from an org that legitimately has
+// none — a false failure on a valid config is worse than this gap.
+//
+// Only a verdict about this organization fails the check: 403 (a policy refuses
+// the token) and 404 (the org is invisible to it). Everything else means the
+// question could not be asked, which is not an answer, so the check passes
+// rather than making validation depend on REST being up. That includes 401:
+// credentials that bad already failed WhoAmI and the GraphQL query above, and
+// reporting them as an organization problem would point at the wrong thing.
+func (gh *gitHubinator) probeOrganizationAccess(ctx context.Context, login string) error {
+	probeLogger := gh.logger.With("login", login)
+
+	endpoint := gitHubRESTBaseURL + "/orgs/" + url.PathEscape(login)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		probeLogger.Debug("unable to build organization access probe", LogKeyError, err)
+
+		return nil
+	}
+
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	resp, err := oauth2.NewClient(ctx, gh.token).Do(req)
+	if err != nil {
+		probeLogger.Debug("organization access probe failed to send", LogKeyError, err)
+
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return nil
+	}
+
+	// GitHub explains the refusal in the body, including which action would fix
+	// it, so pass its wording through rather than inventing a summary.
+	var body struct {
+		Message string `json:"message"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		probeLogger.Debug("unable to decode organization access probe", LogKeyError, err)
+	}
+
+	if body.Message == "" {
+		body.Message = resp.Status
+	}
+
+	probeLogger.Debug("organization access probe denied", "status", resp.StatusCode)
+
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return &GitHubNotFoundError{
+			err: fmt.Errorf("organization '%s' is not visible to this token: %s", login, body.Message),
+		}
+	case http.StatusForbidden:
+		return fmt.Errorf(
+			"organization '%s' cannot be read by this token: %s"+
+				" (GraphQL would report no items rather than failing, so this watch is rejected here)",
+			login, body.Message,
+		)
+	default:
+		return nil
+	}
 }
 
 func (gh *gitHubinator) ListIssues(

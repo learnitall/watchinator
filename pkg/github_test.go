@@ -13,6 +13,7 @@ import (
 
 	"github.com/shurcooL/githubv4"
 	"golang.org/x/exp/slog"
+	"golang.org/x/oauth2"
 	"gotest.tools/v3/assert"
 )
 
@@ -333,9 +334,19 @@ func TestAsSearchQueryDropsEmptyLabels(t *testing.T) {
 	assert.Equal(t, required.asSearchQuery(), "repo:o/n label:x")
 }
 
-// checkOrgAgainst stands up a GraphQL server returning the given repositoryOwner
-// payload, so CheckOrganization's branches can be exercised without a PAT.
+// checkOrgAgainst exercises CheckOrganization with a token that can read the
+// organization, so the GraphQL payload alone decides the outcome.
 func checkOrgAgainst(t *testing.T, ownerJSON string) error {
+	t.Helper()
+
+	return checkOrgAgainstREST(t, ownerJSON, http.StatusOK, `{"login":"some-login"}`)
+}
+
+// checkOrgAgainstREST stands up both surfaces CheckOrganization consults, so its
+// branches can be exercised without a PAT. Stubbing REST is not optional: the
+// access probe would otherwise reach real api.github.com, making a unit test
+// depend on the network and on some-login existing there.
+func checkOrgAgainstREST(t *testing.T, ownerJSON string, status int, body string) error {
 	t.Helper()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -343,6 +354,17 @@ func checkOrgAgainst(t *testing.T, ownerJSON string) error {
 		fmt.Fprintf(w, `{"data":{"repositoryOwner":%s}}`, ownerJSON)
 	}))
 	defer srv.Close()
+
+	rest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(status)
+		fmt.Fprint(w, body)
+	}))
+	defer rest.Close()
+
+	old := gitHubRESTBaseURL
+	gitHubRESTBaseURL = rest.URL
+
+	defer func() { gitHubRESTBaseURL = old }()
 
 	gh := &gitHubinator{
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -400,4 +422,76 @@ func TestCheckOrganizationMissingOwnerIsNotFound(t *testing.T) {
 	// A user is a real owner, just the wrong kind: not a not-found.
 	err := checkOrgAgainst(t, `{"__typename":"User","login":"some-login"}`)
 	assert.Assert(t, !errors.As(err, &notFound))
+}
+
+// samlProbeBody is GitHub's real 403 for a token that is not SSO-authorized.
+const samlProbeBody = `{"message":"Resource protected by organization SAML enforcement.` +
+	` You must grant your Personal Access token access to this organization."}`
+
+// probeAgainst points the REST probe at a server returning the given status and
+// body, so every branch can be exercised without a token.
+func probeAgainst(t *testing.T, status int, body string) error {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, r.URL.Path, "/orgs/an-org")
+		w.WriteHeader(status)
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	old := gitHubRESTBaseURL
+	gitHubRESTBaseURL = srv.URL
+
+	defer func() { gitHubRESTBaseURL = old }()
+
+	gh := &gitHubinator{logger: debugLogger, token: oauth2.StaticTokenSource(&oauth2.Token{})}
+
+	return gh.probeOrganizationAccess(context.Background(), "an-org")
+}
+
+// A SAML-blocked token is the whole reason the probe exists: GraphQL reports
+// zero items for such an org instead of failing, so validation has to catch it.
+func TestProbeOrganizationAccessRejectsSAMLBlocked(t *testing.T) {
+	err := probeAgainst(t, http.StatusForbidden, samlProbeBody)
+	assert.ErrorContains(t, err, "SAML enforcement")
+	// GitHub names the fix; dropping its wording would lose that.
+	assert.ErrorContains(t, err, "grant your Personal Access token access")
+
+	var notFound *GitHubNotFoundError
+	assert.Assert(t, !errors.As(err, &notFound), "a blocked org exists; it is not missing")
+}
+
+// 404 means the org is invisible to this token, which check reports as rc 2.
+func TestProbeOrganizationAccessTreats404AsNotFound(t *testing.T) {
+	var notFound *GitHubNotFoundError
+	assert.Assert(t, errors.As(probeAgainst(t, http.StatusNotFound, `{"message":"Not Found"}`), &notFound))
+}
+
+// Failing to ask is not an answer: REST being down must not fail a watch whose
+// GraphQL checks all passed. 401 belongs here too, not with the denials -- a
+// token that bad already failed WhoAmI and the GraphQL query, so blaming the
+// organization would send the operator after the wrong thing.
+func TestProbeOrganizationAccessIgnoresUnaskableFailures(t *testing.T) {
+	assert.NilError(t, probeAgainst(t, http.StatusInternalServerError, `{"message":"oh no"}`))
+	assert.NilError(t, probeAgainst(t, http.StatusBadGateway, `not json at all`))
+	assert.NilError(t, probeAgainst(t, http.StatusOK, `{"login":"an-org"}`))
+	assert.NilError(t, probeAgainst(t, http.StatusUnauthorized, `{"message":"Bad credentials"}`))
+}
+
+// An empty or unparseable body still has to produce a usable message.
+func TestProbeOrganizationAccessFallsBackToStatus(t *testing.T) {
+	assert.ErrorContains(t, probeAgainst(t, http.StatusForbidden, ``), "403")
+}
+
+// The blindness this guards: GraphQL resolves a SAML-blocked org as a perfectly
+// good Organization, so without the probe CheckOrganization returns nil and the
+// watch polls forever against zero results.
+func TestCheckOrganizationRejectsUnreadableOrganization(t *testing.T) {
+	ok := `{"__typename":"Organization","login":"some-login"}`
+
+	assert.NilError(t, checkOrgAgainstREST(t, ok, http.StatusOK, `{"login":"some-login"}`))
+
+	err := checkOrgAgainstREST(t, ok, http.StatusForbidden, samlProbeBody)
+	assert.ErrorContains(t, err, "SAML enforcement")
 }
